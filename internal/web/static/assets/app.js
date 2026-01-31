@@ -3,6 +3,8 @@ const timezoneValue = document.getElementById('timezoneValue');
 const updatePolicyValue = document.getElementById('updatePolicyValue');
 const adminNameValue = document.getElementById('adminName');
 const authModal = document.getElementById('authModal');
+const settingsWarning = document.getElementById('settingsWarning');
+const settingsWarningList = document.getElementById('settingsWarningList');
 
 const sections = document.querySelectorAll('.section');
 const navItems = document.querySelectorAll('.nav-item');
@@ -195,6 +197,45 @@ function logout() {
   connectionStatus.textContent = '未连接';
 }
 
+function collectSettingsWarnings() {
+  const idle = Number(document.getElementById('idleThreshold').value || 0);
+  const heartbeat = Number(document.getElementById('heartbeatInterval').value || 0);
+  const offline = Number(document.getElementById('offlineThreshold').value || 0);
+  const fish = Number(document.getElementById('fishRatioWarn').value || 0);
+  const warnings = [];
+
+  if (!idle || idle <= 0) {
+    warnings.push('闲置阈值需要大于 0 秒。');
+  }
+  if (!heartbeat || heartbeat <= 0) {
+    warnings.push('心跳间隔需要大于 0 秒。');
+  }
+  if (!offline || offline <= 0) {
+    warnings.push('离线阈值需要大于 0 秒。');
+  }
+
+  if (offline > 0 && heartbeat > 0 && offline <= heartbeat) {
+    warnings.push('离线阈值应大于心跳间隔，否则可能出现“丢一个心跳就离线”的误判。');
+  }
+
+  if (offline > 0 && idle > 0 && offline <= idle) {
+    warnings.push('离线阈值应大于闲置阈值，避免“离开未生效就离线”的体验。');
+  }
+
+  if (Number.isFinite(fish) && (fish < 0 || fish > 100)) {
+    warnings.push('摸鱼比例阈值建议在 0 到 100 之间。');
+  }
+
+  return warnings;
+}
+
+function renderSettingsWarnings() {
+  if (!settingsWarning || !settingsWarningList) return;
+  const warnings = collectSettingsWarnings();
+  settingsWarningList.innerHTML = warnings.map((item) => '<li>' + item + '</li>').join('');
+  settingsWarning.classList.toggle('is-hidden', warnings.length === 0);
+}
+
 async function loadSettings() {
   try {
     const data = await fetchJSON('/api/v1/admin/settings');
@@ -207,6 +248,7 @@ async function loadSettings() {
     document.getElementById('latestVersion').value = data.latestVersion || '';
     document.getElementById('updateUrl').value = data.updateUrl || '';
     updatePolicyValue.textContent = data.updatePolicy === 1 ? '强制更新' : '提示更新';
+    renderSettingsWarnings();
   } catch (error) {
     connectionStatus.textContent = '连接异常';
   }
@@ -222,6 +264,8 @@ async function saveSettings() {
     latestVersion: document.getElementById('latestVersion').value.trim(),
     updateUrl: document.getElementById('updateUrl').value.trim(),
   };
+
+  renderSettingsWarnings();
 
   try {
     await fetchJSON('/api/v1/admin/settings', {
@@ -1159,6 +1203,13 @@ document.getElementById('loginPassword').addEventListener('keydown', (event) => 
 });
 
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
+['idleThreshold', 'heartbeatInterval', 'offlineThreshold', 'fishRatioWarn'].forEach((id) => {
+  const input = document.getElementById(id);
+  if (input) {
+    input.addEventListener('input', renderSettingsWarnings);
+    input.addEventListener('change', renderSettingsWarnings);
+  }
+});
 document.getElementById('refreshRules').addEventListener('click', loadRules);
 document.getElementById('createRule').addEventListener('click', submitRule);
 document.getElementById('cancelRule').addEventListener('click', resetRuleForm);
