@@ -1,0 +1,32 @@
+# 通用
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+.history/
+*.user
+*.suo
+*.cache
+
+# .NET
+**/bin/
+**/obj/
+**/publish/
+*.pdb
+*.dll
+*.exe
+*.runtimeconfig.json
+*.deps.json
+
+# Go
+**/vendor/
+**/dist/
+
+# 日志/临时
+**/*.log
+**/logs/
+
+# 本地配置
+config.yaml

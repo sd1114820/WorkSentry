@@ -1,0 +1,16 @@
+server:
+  addr: ":8080"
+  read_timeout_seconds: 15
+  write_timeout_seconds: 15
+  idle_timeout_seconds: 60
+
+database:
+  dsn: "root:password@tcp(127.0.0.1:3306)/worksentry?parseTime=true&loc=Local&charset=utf8mb4"
+
+app:
+  timezone: "Asia/Shanghai"
+  environment: "dev"
+  admin:
+    username: "admin"
+    password: "admin123"
+    display_name: "管理员"
