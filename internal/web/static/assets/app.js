@@ -230,10 +230,16 @@ function collectSettingsWarnings() {
 }
 
 function renderSettingsWarnings() {
-  if (!settingsWarning || !settingsWarningList) return;
   const warnings = collectSettingsWarnings();
-  settingsWarningList.innerHTML = warnings.map((item) => '<li>' + item + '</li>').join('');
-  settingsWarning.classList.toggle('is-hidden', warnings.length === 0);
+  if (settingsWarning && settingsWarningList) {
+    settingsWarningList.innerHTML = warnings.map((item) => '<li>' + item + '</li>').join('');
+    settingsWarning.classList.toggle('is-hidden', warnings.length === 0);
+  }
+  const saveButton = document.getElementById('saveSettings');
+  if (saveButton) {
+    saveButton.disabled = warnings.length > 0;
+  }
+  return warnings;
 }
 
 async function loadSettings() {
@@ -265,7 +271,11 @@ async function saveSettings() {
     updateUrl: document.getElementById('updateUrl').value.trim(),
   };
 
-  renderSettingsWarnings();
+  const warnings = renderSettingsWarnings();
+  if (warnings.length > 0) {
+    setStatus('请先修正配置提示内容', document.getElementById('settingsStatus'));
+    return;
+  }
 
   try {
     await fetchJSON('/api/v1/admin/settings', {
@@ -308,6 +318,15 @@ function fillRuleForm(rule) {
   document.getElementById('ruleRemark').value = rule.remark || '';
   document.getElementById('ruleEnabled').checked = !!rule.enabled;
   document.getElementById('createRule').textContent = '更新规则';
+}
+
+function focusRuleForm() {
+  const target = document.getElementById('matchValue');
+  if (!target) {
+    return;
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.focus();
 }
 
 async function submitRule() {
@@ -1247,6 +1266,7 @@ document.getElementById('rulesTable').addEventListener('click', (event) => {
     const rule = rulesCache.find((item) => item.id === id);
     if (rule) {
       fillRuleForm(rule);
+      focusRuleForm();
     }
   }
   if (action === 'toggle') {
@@ -1336,5 +1356,7 @@ if (authToken) {
 } else {
   showLogin();
 }
+
+
 
 

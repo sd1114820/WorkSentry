@@ -238,6 +238,24 @@ button, input, select, textarea {
   transition: all 200ms ease;
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-primary:disabled {
+  background: #64748b;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.btn-secondary:disabled {
+  color: rgba(226, 232, 240, 0.5);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .btn-primary {
   background: var(--color-cta);
   color: #ffffff;
