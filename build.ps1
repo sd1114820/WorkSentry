@@ -32,6 +32,36 @@ function Ensure-Directory([string]$path) {
     }
 }
 
+function Test-FileLocked([string]$path) {
+    try {
+        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $stream.Close()
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+function Try-ReplaceFile([string]$source, [string]$dest) {
+    $temp = "$dest.tmp"
+    try {
+        if (Test-Path -LiteralPath $dest) {
+            if (Test-FileLocked $dest) {
+                return $false
+            }
+        }
+        Copy-Item -LiteralPath $source -Destination $temp -Force
+        Move-Item -LiteralPath $temp -Destination $dest -Force
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if (Test-Path -LiteralPath $temp) {
+            Remove-Item -LiteralPath $temp -Force
+        }
+    }
+}
+
 function Build-WebBackend {
     Write-Step '编译网页后端 (Go)'
     Ensure-Tool 'go' '请先安装 Go，并确保 go 在 PATH 中。'
@@ -109,9 +139,15 @@ function Build-Client {
     }
 
     $outExe = Join-Path $RepoRoot 'dist/client/WorkSentry.Client.exe'
-    Copy-Item -LiteralPath $publishExe -Destination $outExe -Force
-
-    Write-Host "输出: $outExe" -ForegroundColor Green
+    if (-not (Try-ReplaceFile $publishExe $outExe)) {
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $fallback = Join-Path $RepoRoot "dist/client/WorkSentry.Client.$timestamp.exe"
+        Copy-Item -LiteralPath $publishExe -Destination $fallback -Force
+        Write-Host "目标文件正在被占用，已输出到: $fallback" -ForegroundColor Yellow
+        Write-Host "请退出正在运行的客户端后重新编译，以覆盖默认文件。" -ForegroundColor Yellow
+    } else {
+        Write-Host "输出: $outExe" -ForegroundColor Green
+    }
     Write-Host "大小: $([Math]::Round($info.Length / 1MB, 1)) MB" -ForegroundColor DarkGray
 }
 

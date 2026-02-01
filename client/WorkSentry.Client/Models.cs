@@ -13,6 +13,7 @@ internal sealed class AppConfig
     public int UpdatePolicy { get; set; } = 0;
     public string LatestVersion { get; set; } = "";
     public string UpdateUrl { get; set; } = "";
+    public bool SuppressCloseTip { get; set; } = false;
     public DateTime? LastConfigAt { get; set; }
 }
 

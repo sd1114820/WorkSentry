@@ -8,9 +8,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>WorkSentry.Client</AssemblyName>
     <RootNamespace>WorkSentry.Client</RootNamespace>
+    <ApplicationIcon>Assets\WorkSentry.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\WorkSentry.ico" />
   </ItemGroup>
 </Project>

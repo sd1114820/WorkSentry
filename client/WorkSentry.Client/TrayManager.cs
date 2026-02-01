@@ -57,14 +57,31 @@ internal sealed class TrayManager : IDisposable
         {
             if (!_allowExit)
             {
+                if (!_config.SuppressCloseTip)
+                {
+                    ShowCloseToTrayTip();
+                }
                 e.Cancel = true;
                 _mainWindow.Hide();
             }
         };
 
+        var appIcon = SystemIcons.Application;
+        try
+        {
+            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                appIcon = Icon.ExtractAssociatedIcon(exePath) ?? SystemIcons.Application;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
         _notifyIcon = new Forms.NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = appIcon,
             Visible = true,
             Text = "WorkSentry 客户端"
         };
@@ -120,6 +137,27 @@ internal sealed class TrayManager : IDisposable
         AutoStartHelper.EnsureAutoStart(_logger);
         UpdateStatus("待上班");
         await CheckUpdateOnStartupAsync().ConfigureAwait(false);
+    }
+
+    private void ShowCloseToTrayTip()
+    {
+        try
+        {
+            var tip = new CloseToTrayTipWindow
+            {
+                Owner = _mainWindow
+            };
+            tip.ShowDialog();
+            if (tip.Remember)
+            {
+                _config.SuppressCloseTip = true;
+                _configStore.Save(_config);
+            }
+        }
+        catch
+        {
+            System.Windows.MessageBox.Show("关闭窗口将最小化到托盘，可在托盘右键退出。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     private async Task CheckUpdateOnStartupAsync()
@@ -473,4 +511,10 @@ internal sealed class TrayManager : IDisposable
         });
     }
 }
+
+
+
+
+
+
 
