@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('web-backend','web-frontend','web','client','all')]
+    [ValidateSet('','web-backend','web-frontend','web','client','all')]
     [string]$Target = ''
 )
 
@@ -311,3 +311,4 @@ while ($true) {
     $Target = ''
     Wait-ReturnToMenu
 }
+
