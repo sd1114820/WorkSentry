@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ internal sealed class TrayManager : IDisposable
     private readonly ConfigStore _configStore;
     private readonly TokenStore _tokenStore;
     private readonly Logger _logger;
+    private readonly UpdateManager _updateManager;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Dispatcher _dispatcher;
     private readonly Forms.ToolStripMenuItem _statusItem;
@@ -23,6 +25,10 @@ internal sealed class TrayManager : IDisposable
     private AppConfig _config;
     private ReportManager? _reportManager;
     private string _pendingUpdateUrl = string.Empty;
+    private string _pendingUpdateVersion = string.Empty;
+    private bool _pendingUpdateForced;
+    private bool _pendingUpdateReady;
+    private bool _isUpdating;
     private bool _isWorking;
     private bool _isStarting;
     private bool _allowExit;
@@ -35,12 +41,18 @@ internal sealed class TrayManager : IDisposable
         _tokenStore = new TokenStore(_configStore.BaseDirectory);
         _logger = new Logger(_configStore.BaseDirectory);
 
+        _updateManager = new UpdateManager(_configStore.BaseDirectory, _logger);
+        _updateManager.PrepareWorkspace();
+        _pendingUpdateReady = _updateManager.HasPendingUpdate();
+
         _mainWindow = new MainWindow();
         _mainWindow.LoadConfig(_config);
         _mainWindow.SaveConfigRequested += OnSaveConfig;
         _mainWindow.StartRequested += async () => await StartWorkingAsync();
         _mainWindow.StopRequested += StopWorking;
         _mainWindow.ExitRequested += Exit;
+        _mainWindow.UpdateNowRequested += () => _ = Task.Run(HandleUpdateNowAsync);
+        _mainWindow.UpdateLaterRequested += HandleUpdateLater;
         _mainWindow.Closing += (_, e) =>
         {
             if (!_allowExit)
@@ -79,10 +91,12 @@ internal sealed class TrayManager : IDisposable
         _notifyIcon.DoubleClick += (_, _) => ShowMainWindow();
         _notifyIcon.BalloonTipClicked += (_, _) =>
         {
-            if (!string.IsNullOrWhiteSpace(_pendingUpdateUrl))
+            if (string.IsNullOrWhiteSpace(_pendingUpdateUrl) && !_pendingUpdateReady)
             {
-                OpenUrl(_pendingUpdateUrl);
+                return;
             }
+            ShowMainWindow();
+            InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(_pendingUpdateForced, _pendingUpdateVersion));
         };
 
         _ = InitializeAsync();
@@ -144,6 +158,16 @@ internal sealed class TrayManager : IDisposable
     {
         if (_isWorking || _isStarting)
         {
+            return;
+        }
+
+        if (_pendingUpdateForced)
+        {
+            InvokeOnUi(() =>
+            {
+                ShowMainWindow();
+                _mainWindow.ShowUpdatePrompt(true, _pendingUpdateVersion);
+            });
             return;
         }
 
@@ -247,30 +271,124 @@ internal sealed class TrayManager : IDisposable
 
     private void OnOptionalUpdate(string? version, string? url)
     {
-        InvokeOnUi(() =>
-        {
-            _pendingUpdateUrl = url ?? string.Empty;
-            ShowBalloon("发现新版本", $"最新版本 {version}，可选择稍后更新。", 5000);
-        });
+        _ = Task.Run(() => HandleOptionalUpdateAsync(version, url));
     }
 
     private void OnForcedUpdate(string? version, string? url)
     {
-        InvokeOnUi(() =>
-        {
-            var message = string.IsNullOrWhiteSpace(version)
-                ? "需要强制更新才能继续使用。"
-                : $"检测到新版本 {version}，需要强制更新才能继续使用。";
-
-            var result = System.Windows.MessageBox.Show(message + "\n点击确定开始更新。", "强制更新", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-            if (result == MessageBoxResult.OK && !string.IsNullOrWhiteSpace(url))
-            {
-                OpenUrl(url);
-            }
-            Exit();
-        });
+        _ = Task.Run(() => HandleForcedUpdateAsync(version, url));
     }
 
+    private async Task HandleOptionalUpdateAsync(string? version, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        _pendingUpdateUrl = url;
+        _pendingUpdateVersion = version ?? string.Empty;
+        _pendingUpdateForced = false;
+        _pendingUpdateReady = _updateManager.HasPendingUpdate();
+
+        InvokeOnUi(() =>
+        {
+            ShowMainWindow();
+            _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion);
+        });
+        await Task.CompletedTask;
+    }
+
+    private async Task HandleForcedUpdateAsync(string? version, string? url)
+    {
+        _pendingUpdateVersion = version ?? string.Empty;
+        _pendingUpdateUrl = url ?? string.Empty;
+        _pendingUpdateForced = true;
+        _pendingUpdateReady = _updateManager.HasPendingUpdate();
+
+        _reportManager?.Stop();
+        _isWorking = false;
+        UpdateStatus("需要更新");
+
+        InvokeOnUi(() =>
+        {
+            _startWorkItem.Enabled = false;
+            _stopWorkItem.Enabled = false;
+            _reportItem.Enabled = false;
+            _mainWindow.SetWorkingState(false);
+            ShowMainWindow();
+            _mainWindow.ShowUpdatePrompt(true, _pendingUpdateVersion);
+        });
+        await Task.CompletedTask;
+    }
+    private void HandleUpdateLater()
+    {
+        if (_pendingUpdateForced)
+        {
+            return;
+        }
+
+        _pendingUpdateVersion = string.Empty;
+        _pendingUpdateUrl = string.Empty;
+        _pendingUpdateReady = _updateManager.HasPendingUpdate();
+        InvokeOnUi(() => _mainWindow.HideUpdatePrompt());
+        _reportManager?.ResetOptionalUpdateNotice();
+    }
+
+    private async Task HandleUpdateNowAsync()
+    {
+        if (_isUpdating)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_pendingUpdateUrl) && !_pendingUpdateReady)
+        {
+            return;
+        }
+
+        _isUpdating = true;
+        try
+        {
+            InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在下载更新，请稍后..."));
+            var downloaded = _pendingUpdateReady || await _updateManager.DownloadUpdateAsync(_pendingUpdateUrl, CancellationToken.None).ConfigureAwait(false);
+            if (!downloaded)
+            {
+                if (_pendingUpdateForced)
+                {
+                    InvokeOnUi(() => _mainWindow.SetUpdateProgress("更新下载失败，程序将退出。"));
+                    await Task.Delay(1500).ConfigureAwait(false);
+                    Exit();
+                    return;
+                }
+
+                InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, "更新下载失败，请稍后重试。"));
+                return;
+            }
+
+            _pendingUpdateReady = true;
+            InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在应用更新，稍后自动重启..."));
+            if (_updateManager.ApplyPendingUpdate())
+            {
+                Exit();
+                return;
+            }
+
+            if (_pendingUpdateForced)
+            {
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress("启动更新失败，程序将退出。"));
+                await Task.Delay(1500).ConfigureAwait(false);
+                Exit();
+                return;
+            }
+
+            InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, "启动更新失败，请稍后重试。"));
+        }
+        finally
+        {
+            _isUpdating = false;
+        }
+    }
     private void InvokeOnUi(Action action)
     {
         if (_dispatcher.CheckAccess())

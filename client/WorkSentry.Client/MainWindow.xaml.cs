@@ -37,6 +37,8 @@ internal sealed partial class MainWindow : Window
     public event Action? StartRequested;
     public event Action? StopRequested;
     public event Action? ExitRequested;
+    public event Action? UpdateNowRequested;
+    public event Action? UpdateLaterRequested;
 
     public MainWindow()
     {
@@ -48,6 +50,8 @@ internal sealed partial class MainWindow : Window
         StartButton.Click += (_, _) => StartRequested?.Invoke();
         StopButton.Click += (_, _) => StopRequested?.Invoke();
         ExitButton.Click += (_, _) => ExitRequested?.Invoke();
+        UpdateNowButton.Click += (_, _) => UpdateNowRequested?.Invoke();
+        UpdateLaterButton.Click += (_, _) => UpdateLaterRequested?.Invoke();
     }
 
     private void SaveConfig()
@@ -130,6 +134,34 @@ internal sealed partial class MainWindow : Window
         }
     }
 
+    internal void ShowUpdatePrompt(bool forced, string? version, string? messageOverride = null)
+    {
+        var versionText = string.IsNullOrWhiteSpace(version) ? string.Empty : $" {version}";
+        var message = messageOverride ?? (forced
+            ? $"检测到新版本{versionText}，需要强制更新才能继续使用。"
+            : $"检测到新版本{versionText}，是否立即更新？");
+
+        UpdateTitleText.Text = forced ? "强制更新" : "发现新版本";
+        UpdateMessageText.Text = message;
+        UpdateLaterButton.Visibility = forced ? Visibility.Collapsed : Visibility.Visible;
+        UpdateLaterButton.IsEnabled = !forced;
+        UpdateNowButton.Content = forced ? "确定" : "更新";
+        UpdateNowButton.IsEnabled = true;
+        UpdateOverlay.Visibility = Visibility.Visible;
+    }
+
+    internal void SetUpdateProgress(string message)
+    {
+        UpdateMessageText.Text = message;
+        UpdateNowButton.IsEnabled = false;
+        UpdateLaterButton.IsEnabled = false;
+        UpdateOverlay.Visibility = Visibility.Visible;
+    }
+
+    internal void HideUpdatePrompt()
+    {
+        UpdateOverlay.Visibility = Visibility.Collapsed;
+    }
     internal void FocusEmployeeCode()
     {
         EmployeeCodeBox.Focus();

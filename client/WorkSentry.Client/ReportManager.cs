@@ -68,6 +68,11 @@ internal sealed class ReportManager
         _token = null;
     }
 
+    public void ResetOptionalUpdateNotice()
+    {
+        _optionalUpdateNotified = "";
+    }
+
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
