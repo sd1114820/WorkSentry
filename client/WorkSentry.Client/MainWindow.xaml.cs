@@ -140,6 +140,7 @@ internal sealed partial class MainWindow : Window
         var message = messageOverride ?? (forced
             ? $"检测到新版本{versionText}，需要强制更新才能继续使用。"
             : $"检测到新版本{versionText}，是否立即更新？");
+        ResetUpdateProgress();
 
         UpdateTitleText.Text = forced ? "强制更新" : "发现新版本";
         UpdateMessageText.Text = message;
@@ -156,6 +157,55 @@ internal sealed partial class MainWindow : Window
         UpdateNowButton.IsEnabled = false;
         UpdateLaterButton.IsEnabled = false;
         UpdateOverlay.Visibility = Visibility.Visible;
+    }
+
+    internal void UpdateDownloadProgress(string stage, long receivedBytes, long? totalBytes)
+    {
+        UpdateProgressBar.Visibility = Visibility.Visible;
+        UpdateProgressText.Visibility = Visibility.Visible;
+
+        if (totalBytes.HasValue && totalBytes.Value > 0)
+        {
+            UpdateProgressBar.IsIndeterminate = false;
+            var percent = Math.Min(100, Math.Round(receivedBytes * 100d / totalBytes.Value, 1));
+            UpdateProgressBar.Value = percent;
+            UpdateProgressText.Text = $"{stage}：{FormatBytes(receivedBytes)} / {FormatBytes(totalBytes.Value)}（{percent:0.0}%）";
+        }
+        else
+        {
+            UpdateProgressBar.IsIndeterminate = true;
+            UpdateProgressText.Text = $"{stage}：已下载 {FormatBytes(receivedBytes)}";
+        }
+    }
+
+    private void ResetUpdateProgress()
+    {
+        UpdateProgressBar.Visibility = Visibility.Collapsed;
+        UpdateProgressText.Visibility = Visibility.Collapsed;
+        UpdateProgressBar.IsIndeterminate = false;
+        UpdateProgressBar.Value = 0;
+        UpdateProgressText.Text = string.Empty;
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const double kb = 1024d;
+        const double mb = kb * 1024d;
+        const double gb = mb * 1024d;
+
+        if (bytes >= gb)
+        {
+            return $"{bytes / gb:0.0} GB";
+        }
+        if (bytes >= mb)
+        {
+            return $"{bytes / mb:0.0} MB";
+        }
+        if (bytes >= kb)
+        {
+            return $"{bytes / kb:0.0} KB";
+        }
+        return $"{bytes} B";
     }
 
     internal void HideUpdatePrompt()

@@ -119,7 +119,28 @@ internal sealed class TrayManager : IDisposable
     {
         AutoStartHelper.EnsureAutoStart(_logger);
         UpdateStatus("待上班");
-        await Task.CompletedTask;
+        await CheckUpdateOnStartupAsync().ConfigureAwait(false);
+    }
+
+    private async Task CheckUpdateOnStartupAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_config.EmployeeCode))
+        {
+            return;
+        }
+
+        try
+        {
+            EnsureReportManager();
+            if (_reportManager != null)
+            {
+                await _reportManager.CheckUpdateAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"启动更新检查失败: {ex.Message}");
+        }
     }
 
     private void ShowMainWindow()
@@ -350,27 +371,38 @@ internal sealed class TrayManager : IDisposable
         _isUpdating = true;
         try
         {
-            InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在下载更新，请稍后..."));
-            var downloaded = _pendingUpdateReady || await _updateManager.DownloadUpdateAsync(_pendingUpdateUrl, CancellationToken.None).ConfigureAwait(false);
-            if (!downloaded)
+            var progress = new Progress<UpdateProgress>(p =>
             {
-                if (_pendingUpdateForced)
+                InvokeOnUi(() => _mainWindow.UpdateDownloadProgress(p.Stage, p.ReceivedBytes, p.TotalBytes));
+            });
+
+            UpdateDownloadResult result = UpdateDownloadResult.Ok(UpdatePackageType.Exe);
+            if (!_pendingUpdateReady)
+            {
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在下载更新，请稍后..."));
+                result = await _updateManager.DownloadUpdateAsync(_pendingUpdateUrl, progress, CancellationToken.None).ConfigureAwait(false);
+                if (!result.Success)
                 {
-                    InvokeOnUi(() => _mainWindow.SetUpdateProgress("更新下载失败，程序将退出。"));
-                    await Task.Delay(1500).ConfigureAwait(false);
-                    Exit();
+                    if (_pendingUpdateForced)
+                    {
+                        InvokeOnUi(() => _mainWindow.SetUpdateProgress($"更新下载失败：{result.Error}"));
+                        await Task.Delay(1500).ConfigureAwait(false);
+                        Exit();
+                        return;
+                    }
+
+                    InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, $"更新下载失败：{result.Error}"));
                     return;
                 }
-
-                InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, "更新下载失败，请稍后重试。"));
-                return;
             }
 
             _pendingUpdateReady = true;
             InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在应用更新，稍后自动重启..."));
             if (_updateManager.ApplyPendingUpdate())
             {
-                Exit();
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在重启，请稍候..."));
+                await Task.Delay(300).ConfigureAwait(false);
+                Environment.Exit(0);
                 return;
             }
 

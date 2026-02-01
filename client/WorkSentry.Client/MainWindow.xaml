@@ -288,6 +288,8 @@
                     <Border Background="#F3F4F6" CornerRadius="6" Padding="10" Margin="0,12,0,0">
                         <TextBlock Text="更新将自动下载并替换客户端，完成后自动重启。" FontSize="12" Foreground="#6B7280" TextWrapping="Wrap" />
                     </Border>
+                    <ProgressBar x:Name="UpdateProgressBar" Height="6" Margin="0,12,0,0" Minimum="0" Maximum="100" Visibility="Collapsed" />
+                    <TextBlock x:Name="UpdateProgressText" Text="" FontSize="12" Foreground="#6B7280" Margin="0,6,0,0" Visibility="Collapsed" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
                         <Button x:Name="UpdateLaterButton" Content="下次提示" Style="{StaticResource OutlineButton}" Margin="0,0,12,0" />
                         <Button x:Name="UpdateNowButton" Content="更新" Style="{StaticResource PrimaryButton}" />

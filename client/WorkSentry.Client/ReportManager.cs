@@ -73,6 +73,33 @@ internal sealed class ReportManager
         _optionalUpdateNotified = "";
     }
 
+    public async Task CheckUpdateAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_config.EmployeeCode))
+        {
+            return;
+        }
+
+        try
+        {
+            var fingerprint = FingerprintProvider.GetFingerprint(_logger);
+            var response = await _apiClient.BindAsync(new ClientBindRequest
+            {
+                EmployeeCode = _config.EmployeeCode,
+                Fingerprint = fingerprint,
+                ClientVersion = AppConstants.ClientVersion
+            }, ct).ConfigureAwait(false);
+
+            _token = response.Token;
+            _tokenStore.SaveToken(response.Token);
+            ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"启动更新检查失败: {ex.Message}");
+        }
+    }
+
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
