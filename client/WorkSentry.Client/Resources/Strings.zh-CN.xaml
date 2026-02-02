@@ -79,4 +79,7 @@
   <sys:String x:Key="LastReportFormat">最后上报: {0}</sys:String>
   <sys:String x:Key="UpdateProgressDetail">{0}：{1} / {2}（{3:0.0}%）</sys:String>
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}：已下载 {1}</sys:String>
-</ResourceDictionary>
+  <sys:String x:Key="MsgWorkStartFailed">无法连接服务端，无法开始上班。</sys:String>
+  <sys:String x:Key="MsgWorkEndFailed">无法连接服务端，无法下班，请稍后重试。</sys:String>
+  <sys:String x:Key="MsgExitNeedStop">当前已上班，退出前请先下班。</sys:String></ResourceDictionary>
+

@@ -79,4 +79,7 @@
   <sys:String x:Key="LastReportFormat">Last report: {0}</sys:String>
   <sys:String x:Key="UpdateProgressDetail">{0}: {1} / {2} ({3:0.0}%)</sys:String>
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}: downloaded {1}</sys:String>
-</ResourceDictionary>
+  <sys:String x:Key="MsgWorkStartFailed">Cannot reach server. Unable to clock in.</sys:String>
+  <sys:String x:Key="MsgWorkEndFailed">Cannot reach server. Unable to clock out. Please try again.</sys:String>
+  <sys:String x:Key="MsgExitNeedStop">You are working. Please clock out before exiting.</sys:String></ResourceDictionary>
+

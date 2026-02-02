@@ -386,6 +386,15 @@ type Employee struct {
 	CreatedAt        time.Time               `json:"created_at"`
 }
 
+type WorkSession struct {
+	ID         int64        `json:"id"`
+	EmployeeID int64        `json:"employee_id"`
+	StartAt    time.Time    `json:"start_at"`
+	EndAt      sql.NullTime `json:"end_at"`
+	CreatedAt  time.Time    `json:"created_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+}
+
 type ManualAdjustment struct {
 	ID         int64                   `json:"id"`
 	EmployeeID int64                   `json:"employee_id"`
@@ -453,3 +462,4 @@ type TimeSegment struct {
 	Source      TimeSegmentsSource `json:"source"`
 	CreatedAt   time.Time          `json:"created_at"`
 }
+

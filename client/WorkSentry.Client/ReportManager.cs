@@ -101,6 +101,17 @@ internal sealed class ReportManager
         }
     }
 
+    public async Task<bool> SendWorkStartAsync(CancellationToken ct)
+    {
+        var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
+        return await TrySendReportAsync(sample, "work_start", ct, false).ConfigureAwait(false);
+    }
+
+    public async Task<bool> SendWorkEndAsync(CancellationToken ct)
+    {
+        var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
+        return await TrySendReportAsync(sample, "work_end", ct, false).ConfigureAwait(false);
+    }
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
@@ -176,9 +187,14 @@ internal sealed class ReportManager
 
     private async Task SafeSendAsync(SampleState sample, string reportType, CancellationToken ct)
     {
+        _ = await TrySendReportAsync(sample, reportType, ct, true).ConfigureAwait(false);
+    }
+
+    private async Task<bool> TrySendReportAsync(SampleState sample, string reportType, CancellationToken ct, bool notifyStatus)
+    {
         if (!_backoff.CanSend)
         {
-            return;
+            return false;
         }
 
         try
@@ -187,7 +203,11 @@ internal sealed class ReportManager
             var response = await SendReportAsync(sample, reportType, ct).ConfigureAwait(false);
             _backoff.RegisterSuccess();
             ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
-            StatusChanged?.Invoke("已上报");
+            if (notifyStatus)
+            {
+                StatusChanged?.Invoke("已上报");
+            }
+            return true;
         }
         catch (UpgradeRequiredException ex)
         {
@@ -224,6 +244,7 @@ internal sealed class ReportManager
             _logger.Error(ex.Message);
             _backoff.RegisterFailure();
         }
+        return false;
     }
 
     private async Task<ClientReportResponse> SendReportAsync(SampleState sample, string reportType, CancellationToken ct)

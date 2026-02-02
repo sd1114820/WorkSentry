@@ -10,15 +10,151 @@ import (
 	"database/sql"
 )
 
-const clearEmployeeFingerprint = `-- name: ClearEmployeeFingerprint :exec
-UPDATE employees
-SET fingerprint_hash = NULL
-WHERE id = ?
+const listEmployeesAdmin = `-- name: ListEmployeesAdmin :many
+SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
+       ws.last_start_at, ws.last_end_at
+FROM employees e
+LEFT JOIN departments d ON e.department_id = d.id
+LEFT JOIN (
+  SELECT w1.employee_id, w1.start_at AS last_start_at, w1.end_at AS last_end_at
+  FROM work_sessions w1
+  JOIN (
+    SELECT employee_id, MAX(start_at) AS max_start
+    FROM work_sessions
+    GROUP BY employee_id
+  ) w2 ON w1.employee_id = w2.employee_id AND w1.start_at = w2.max_start
+) ws ON ws.employee_id = e.id
+ORDER BY e.id DESC
 `
 
-func (q *Queries) ClearEmployeeFingerprint(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, clearEmployeeFingerprint, id)
-	return err
+type ListEmployeesAdminRow struct {
+	ID              int64          `json:"id"`
+	EmployeeCode    string         `json:"employee_code"`
+	Name            string         `json:"name"`
+	DepartmentID    sql.NullInt64  `json:"department_id"`
+	DepartmentName  sql.NullString `json:"department_name"`
+	FingerprintHash sql.NullString `json:"fingerprint_hash"`
+	Enabled         bool           `json:"enabled"`
+	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
+	LastStartAt     sql.NullTime   `json:"last_start_at"`
+	LastEndAt       sql.NullTime   `json:"last_end_at"`
+}
+
+func (q *Queries) ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEmployeesAdmin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEmployeesAdminRow
+	for rows.Next() {
+		var i ListEmployeesAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeCode,
+			&i.Name,
+			&i.DepartmentID,
+			&i.DepartmentName,
+			&i.FingerprintHash,
+			&i.Enabled,
+			&i.LastSeenAt,
+			&i.LastStartAt,
+			&i.LastEndAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEmployeesAdminByKeyword = `-- name: ListEmployeesAdminByKeyword :many
+SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
+       ws.last_start_at, ws.last_end_at
+FROM employees e
+LEFT JOIN departments d ON e.department_id = d.id
+LEFT JOIN (
+  SELECT w1.employee_id, w1.start_at AS last_start_at, w1.end_at AS last_end_at
+  FROM work_sessions w1
+  JOIN (
+    SELECT employee_id, MAX(start_at) AS max_start
+    FROM work_sessions
+    GROUP BY employee_id
+  ) w2 ON w1.employee_id = w2.employee_id AND w1.start_at = w2.max_start
+) ws ON ws.employee_id = e.id
+WHERE e.employee_code LIKE ? OR e.name LIKE ?
+ORDER BY e.id DESC
+`
+
+type ListEmployeesAdminByKeywordParams struct {
+	EmployeeCode string `json:"employee_code"`
+	Name         string `json:"name"`
+}
+
+type ListEmployeesAdminByKeywordRow struct {
+	ID              int64          `json:"id"`
+	EmployeeCode    string         `json:"employee_code"`
+	Name            string         `json:"name"`
+	DepartmentID    sql.NullInt64  `json:"department_id"`
+	DepartmentName  sql.NullString `json:"department_name"`
+	FingerprintHash sql.NullString `json:"fingerprint_hash"`
+	Enabled         bool           `json:"enabled"`
+	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
+	LastStartAt     sql.NullTime   `json:"last_start_at"`
+	LastEndAt       sql.NullTime   `json:"last_end_at"`
+}
+
+func (q *Queries) ListEmployeesAdminByKeyword(ctx context.Context, arg ListEmployeesAdminByKeywordParams) ([]ListEmployeesAdminByKeywordRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEmployeesAdminByKeyword, arg.EmployeeCode, arg.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEmployeesAdminByKeywordRow
+	for rows.Next() {
+		var i ListEmployeesAdminByKeywordRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeCode,
+			&i.Name,
+			&i.DepartmentID,
+			&i.DepartmentName,
+			&i.FingerprintHash,
+			&i.Enabled,
+			&i.LastSeenAt,
+			&i.LastStartAt,
+			&i.LastEndAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getMaxAutoEmployeeCodeNumber = `-- name: GetMaxAutoEmployeeCodeNumber :one
+SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
+FROM employees
+WHERE employee_code LIKE 'AUTO-%'
+`
+
+func (q *Queries) GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getMaxAutoEmployeeCodeNumber)
+	var maxNumber int64
+	err := row.Scan(&maxNumber)
+	return maxNumber, err
 }
 
 const createEmployee = `-- name: CreateEmployee :exec
@@ -41,125 +177,6 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		arg.Enabled,
 	)
 	return err
-}
-
-const getMaxAutoEmployeeCodeNumber = `-- name: GetMaxAutoEmployeeCodeNumber :one
-SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
-FROM employees
-WHERE employee_code LIKE 'AUTO-%'
-`
-
-func (q *Queries) GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getMaxAutoEmployeeCodeNumber)
-	var maxNumber int64
-	err := row.Scan(&maxNumber)
-	return maxNumber, err
-}
-
-const listEmployeesAdmin = `-- name: ListEmployeesAdmin :many
-SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at
-FROM employees e
-LEFT JOIN departments d ON e.department_id = d.id
-ORDER BY e.id DESC
-`
-
-type ListEmployeesAdminRow struct {
-	ID              int64          `json:"id"`
-	EmployeeCode    string         `json:"employee_code"`
-	Name            string         `json:"name"`
-	DepartmentID    sql.NullInt64  `json:"department_id"`
-	DepartmentName  sql.NullString `json:"department_name"`
-	FingerprintHash sql.NullString `json:"fingerprint_hash"`
-	Enabled         bool           `json:"enabled"`
-	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
-}
-
-func (q *Queries) ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminRow, error) {
-	rows, err := q.db.QueryContext(ctx, listEmployeesAdmin)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListEmployeesAdminRow
-	for rows.Next() {
-		var i ListEmployeesAdminRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.EmployeeCode,
-			&i.Name,
-			&i.DepartmentID,
-			&i.DepartmentName,
-			&i.FingerprintHash,
-			&i.Enabled,
-			&i.LastSeenAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEmployeesAdminByKeyword = `-- name: ListEmployeesAdminByKeyword :many
-SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at
-FROM employees e
-LEFT JOIN departments d ON e.department_id = d.id
-WHERE e.employee_code LIKE ? OR e.name LIKE ?
-ORDER BY e.id DESC
-`
-
-type ListEmployeesAdminByKeywordParams struct {
-	EmployeeCode string `json:"employee_code"`
-	Name         string `json:"name"`
-}
-
-type ListEmployeesAdminByKeywordRow struct {
-	ID              int64          `json:"id"`
-	EmployeeCode    string         `json:"employee_code"`
-	Name            string         `json:"name"`
-	DepartmentID    sql.NullInt64  `json:"department_id"`
-	DepartmentName  sql.NullString `json:"department_name"`
-	FingerprintHash sql.NullString `json:"fingerprint_hash"`
-	Enabled         bool           `json:"enabled"`
-	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
-}
-
-func (q *Queries) ListEmployeesAdminByKeyword(ctx context.Context, arg ListEmployeesAdminByKeywordParams) ([]ListEmployeesAdminByKeywordRow, error) {
-	rows, err := q.db.QueryContext(ctx, listEmployeesAdminByKeyword, arg.EmployeeCode, arg.Name)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListEmployeesAdminByKeywordRow
-	for rows.Next() {
-		var i ListEmployeesAdminByKeywordRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.EmployeeCode,
-			&i.Name,
-			&i.DepartmentID,
-			&i.DepartmentName,
-			&i.FingerprintHash,
-			&i.Enabled,
-			&i.LastSeenAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const updateEmployee = `-- name: UpdateEmployee :exec
@@ -200,5 +217,16 @@ type UpdateEmployeeEnabledParams struct {
 
 func (q *Queries) UpdateEmployeeEnabled(ctx context.Context, arg UpdateEmployeeEnabledParams) error {
 	_, err := q.db.ExecContext(ctx, updateEmployeeEnabled, arg.Enabled, arg.ID)
+	return err
+}
+
+const clearEmployeeFingerprint = `-- name: ClearEmployeeFingerprint :exec
+UPDATE employees
+SET fingerprint_hash = NULL
+WHERE id = ?
+`
+
+func (q *Queries) ClearEmployeeFingerprint(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, clearEmployeeFingerprint, id)
 	return err
 }

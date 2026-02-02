@@ -130,6 +130,8 @@ func statusLabel(status string) string {
 		return "离开"
 	case "offline":
 		return "离线"
+	case "offwork":
+		return "已下班"
 	case "incident":
 		return "系统事故"
 	default:

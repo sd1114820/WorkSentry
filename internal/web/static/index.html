@@ -234,7 +234,12 @@
             <div class='form-grid'>
               <label>
                 <span>员工</span>
-                <select id='timelineEmployee'></select>
+                <div class="search-select" id="timelineEmployeeSelect">
+  <input type="text" id="timelineEmployeeSearch" placeholder="搜索工号 / 姓名" autocomplete="off" />
+  <input type="hidden" id="timelineEmployee" />
+  <div class="search-select-panel" id="timelineEmployeePanel"></div>
+</div>
+<div class="field-hint" id="timelineEmployeeHint">正在加载员工...</div>
               </label>
               <label>
                 <span>日期</span>
@@ -429,4 +434,5 @@
   <script src='/assets/app.js'></script>
 </body>
 </html>
+
 

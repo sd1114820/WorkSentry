@@ -28,6 +28,9 @@ type Querier interface {
 	CreateRawEvent(ctx context.Context, arg CreateRawEventParams) error
 	CreateRule(ctx context.Context, arg CreateRuleParams) (sql.Result, error)
 	CreateTimeSegment(ctx context.Context, arg CreateTimeSegmentParams) error
+	CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) error
+	CloseWorkSession(ctx context.Context, arg CloseWorkSessionParams) error
+	GetOpenWorkSessionByEmployee(ctx context.Context, employeeID int64) (WorkSession, error)
 	CreateToken(ctx context.Context, arg CreateTokenParams) error
 	DeleteDepartment(ctx context.Context, id int64) error
 	DeleteIncident(ctx context.Context, id int64) error
@@ -77,4 +80,5 @@ type Querier interface {
 }
 
 var _ Querier = (*Queries)(nil)
+
 

@@ -16,6 +16,7 @@ let liveItems = [];
 let liveMap = {};
 let liveTimer = null;
 let wsClient = null;
+let timelineSearchReady = false;
 
 let editingRuleId = null;
 let editingAdjustmentId = null;
@@ -443,6 +444,11 @@ function getLiveDisplay(item) {
   let statusCode = item.statusCode || 'normal';
   let statusLabel = item.statusLabel || '常规';
   let remaining = null;
+  if (item && (item.working === false || statusCode === 'offwork')) {
+    statusCode = 'offwork';
+    statusLabel = item.statusLabel || '已下班';
+    return { statusCode: statusCode, statusLabel: statusLabel, remaining: null };
+  }
   const delaySeconds = item.delaySeconds || 0;
   if (offlineThreshold > 0) {
     if (delaySeconds > offlineThreshold) {
@@ -1073,28 +1079,112 @@ async function loadEmployees() {
     employees = Array.isArray(items) ? items : [];
     renderEmployeeOptions();
     renderEmployeesTable(employees);
+    initTimelineSearch();
   } catch (error) {
     document.getElementById('employeesTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
+    updateTimelineHint(error.message || '员工列表加载失败');
   }
+}
+
+function formatEmployeeLabel(emp) {
+  const code = emp.employeeCode || '';
+  const name = emp.name || '';
+  if (code && name) {
+    return code + ' ' + name;
+  }
+  return code || name || '-';
+}
+
+function updateTimelineHint(message) {
+  const hint = document.getElementById('timelineEmployeeHint');
+  if (!hint) return;
+  hint.textContent = message;
+}
+
+function renderTimelineSearchOptions(keyword) {
+  const panel = document.getElementById('timelineEmployeePanel');
+  if (!panel) return;
+  const value = (keyword || '').trim().toLowerCase();
+  const list = employees.filter((emp) => {
+    const text = [emp.employeeCode, emp.name].join(' ').toLowerCase();
+    return !value || text.includes(value);
+  });
+  if (list.length === 0) {
+    panel.innerHTML = '<div class=\'search-select-empty\'>未找到匹配员工</div>';
+    return;
+  }
+  panel.innerHTML = list.map((emp) => {
+    return '<div class=\'search-select-item\' data-code=\'' + emp.employeeCode + '\'>' + formatEmployeeLabel(emp) + '</div>';
+  }).join('');
+}
+
+function refreshTimelineSearch() {
+  if (!employees || employees.length === 0) {
+    updateTimelineHint('暂无员工');
+  } else {
+    updateTimelineHint('已加载 ' + employees.length + ' 人');
+  }
+  const panel = document.getElementById('timelineEmployeePanel');
+  const input = document.getElementById('timelineEmployeeSearch');
+  if (panel && panel.classList.contains('is-open')) {
+    renderTimelineSearchOptions(input ? input.value : '');
+  }
+}
+
+function initTimelineSearch() {
+  if (timelineSearchReady) return;
+  const root = document.getElementById('timelineEmployeeSelect');
+  const input = document.getElementById('timelineEmployeeSearch');
+  const panel = document.getElementById('timelineEmployeePanel');
+  const hidden = document.getElementById('timelineEmployee');
+  if (!root || !input || !panel || !hidden) return;
+  timelineSearchReady = true;
+
+  const openPanel = () => {
+    panel.classList.add('is-open');
+    renderTimelineSearchOptions(input.value);
+  };
+
+  input.addEventListener('focus', openPanel);
+  input.addEventListener('input', () => {
+    hidden.value = '';
+    openPanel();
+  });
+
+  panel.addEventListener('mousedown', (event) => {
+    const item = event.target.closest('.search-select-item');
+    if (!item) return;
+    const code = item.dataset.code || '';
+    const emp = employees.find((row) => row.employeeCode === code);
+    if (emp) {
+      hidden.value = emp.employeeCode;
+      input.value = formatEmployeeLabel(emp);
+    }
+    panel.classList.remove('is-open');
+    event.preventDefault();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!root.contains(event.target)) {
+      panel.classList.remove('is-open');
+    }
+  });
 }
 
 function renderEmployeeOptions() {
   const adjustSelect = document.getElementById('adjustEmployee');
-  const timelineSelect = document.getElementById('timelineEmployee');
   const offlineSelect = document.getElementById('offlineEmployee');
   const options = employees.map((emp) => {
     const label = emp.name + '（' + emp.employeeCode + '）' + (emp.enabled ? '' : '（停用）');
-    return '<option value="' + emp.employeeCode + '">' + label + '</option>';
+    return '<option value=\'' + emp.employeeCode + '\'>' + label + '</option>';
   }).join('');
   if (adjustSelect) {
-    adjustSelect.innerHTML = '<option value="">请选择员工</option>' + options;
-  }
-  if (timelineSelect) {
-    timelineSelect.innerHTML = '<option value="">请选择员工</option>' + options;
+    adjustSelect.innerHTML = '<option value=\'\'>请选择员工</option>' + options;
   }
   if (offlineSelect) {
-    offlineSelect.innerHTML = '<option value="">全部</option>' + options;
+    offlineSelect.innerHTML = '<option value=\'\'>全部</option>' + options;
   }
+  refreshTimelineSearch();
 }
 
 function resetEmployeeForm() {
@@ -1165,7 +1255,7 @@ async function disableEmployee(id) {
 
 function renderEmployeesTable(items) {
   const container = document.getElementById('employeesTable');
-  const headers = ['工号', '姓名', '部门', '绑定状态', '最近上报', '状态', '操作'];
+  const headers = ['工号', '姓名', '部门', '绑定状态', '上班时间', '下班时间', '最近上报', '状态', '操作'];
   const rows = items.map((item) => {
     const statusLabel = item.enabled ? '启用' : '停用';
     const actions = [
@@ -1177,19 +1267,23 @@ function renderEmployeesTable(items) {
     if (item.enabled) {
       actions.push('<button class="btn btn-secondary" data-action="disable" data-id="' + item.id + '">停用</button>');
     }
+    const clockIn = item.lastClockIn || '未上班';
+    const clockOut = item.lastClockOut || (item.lastClockIn ? '未下班' : '-');
     return [
-      '<div class="table-row cols-7">',
+      '<div class="table-row cols-9">',
       '<div>' + item.employeeCode + '</div>',
       '<div>' + item.name + '</div>',
       '<div>' + (item.department || '-') + '</div>',
       '<div>' + item.bindStatus + '</div>',
+      '<div>' + clockIn + '</div>',
+      '<div>' + clockOut + '</div>',
       '<div>' + (item.lastSeen || '-') + '</div>',
       '<div>' + statusLabel + '</div>',
       '<div>' + actions.join('') + '</div>',
       '</div>'
     ].join('');
   });
-  renderTable(container, headers, rows, 'cols-7');
+  renderTable(container, headers, rows, 'cols-9');
 }
 
 async function initApp() {
@@ -1356,6 +1450,14 @@ if (authToken) {
 } else {
   showLogin();
 }
+
+
+
+
+
+
+
+
 
 
 

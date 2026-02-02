@@ -1,13 +1,11 @@
 @echo off
 setlocal
 
-if "%WORKSENTRY_SERVER_GOOS%"=="" set "WORKSENTRY_SERVER_GOOS=linux"
-if "%WORKSENTRY_SERVER_GOARCH%"=="" set "WORKSENTRY_SERVER_GOARCH=amd64"
-if "%GOOS%"=="" set "GOOS=%WORKSENTRY_SERVER_GOOS%"
-if "%GOARCH%"=="" set "GOARCH=%WORKSENTRY_SERVER_GOARCH%"
+rem 固定编译 Linux 服务器二进制（在 Windows 上交叉编译）
+set "WORKSENTRY_SERVER_GOOS=linux"
+set "WORKSENTRY_SERVER_GOARCH=amd64"
 echo 目标平台: %WORKSENTRY_SERVER_GOOS%/%WORKSENTRY_SERVER_GOARCH%
 cd /d "%~dp0"
-
 chcp 65001 >nul
 set "LOGDIR=%TEMP%\WorkSentry"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
@@ -48,4 +46,5 @@ if errorlevel 1 (
 echo.
 echo 构建完成。
 pause
+
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -186,6 +187,11 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := h.handleWorkSessionReport(r.Context(), employee.ID, payload.ReportType, now); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	rules, _ := h.Queries.ListEnabledRules(r.Context())
 
 	status := determineStatus(payload.IdleSeconds, settings.IdleThresholdSeconds, payload.ProcessName, payload.WindowTitle, rules)
@@ -239,17 +245,27 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		ID:               employee.ID,
 	})
 
+	reportType := strings.TrimSpace(payload.ReportType)
+	isWorking := reportType != "work_end"
+	statusForLive := status
+	descriptionForLive := description
+	if !isWorking {
+		statusForLive = "offwork"
+		descriptionForLive = "已下班"
+	}
+
 	h.Hub.Broadcast(LiveMessage{
 		Type: "update",
 		Item: LiveView{
 			EmployeeCode: employee.EmployeeCode,
 			Name:         employee.Name,
 			Department:   "",
-			StatusCode:   status,
-			StatusLabel:  statusLabel(status),
-			Description:  description,
+			StatusCode:   statusForLive,
+			StatusLabel:  statusLabel(statusForLive),
+			Description:  descriptionForLive,
 			LastSeen:     formatTime(now),
 			DelaySeconds: 0,
+			Working:      isWorking,
 		},
 		Time: formatTime(now),
 	})
@@ -282,6 +298,31 @@ func clientIP(r *http.Request) string {
 	return ip
 }
 
+func (h *Handler) handleWorkSessionReport(ctx context.Context, employeeID int64, reportType string, now time.Time) error {
+	reportType = strings.TrimSpace(reportType)
+	switch reportType {
+	case "work_start":
+		if _, err := h.Queries.GetOpenWorkSessionByEmployee(ctx, employeeID); err == nil {
+			return nil
+		} else if err != sql.ErrNoRows {
+			return fmt.Errorf("读取上班状态失败")
+		}
+		if err := h.Queries.CreateWorkSession(ctx, sqlc.CreateWorkSessionParams{
+			EmployeeID: employeeID,
+			StartAt:    now,
+		}); err != nil {
+			return fmt.Errorf("写入上班记录失败")
+		}
+	case "work_end":
+		if err := h.Queries.CloseWorkSession(ctx, sqlc.CloseWorkSessionParams{
+			EmployeeID: employeeID,
+			EndAt:      now,
+		}); err != nil {
+			return fmt.Errorf("写入下班记录失败")
+		}
+	}
+	return nil
+}
 func determineStatus(idleSeconds int32, idleThreshold int32, processName string, windowTitle string, rules []sqlc.ListEnabledRulesRow) string {
 	if idleSeconds >= idleThreshold {
 		return "idle"
@@ -490,3 +531,12 @@ func parseVersionParts(version string) []int {
 	}
 	return values
 }
+
+
+
+
+
+
+
+
+

@@ -156,23 +156,40 @@ function Build-WebBackend {
 
     Ensure-Directory 'dist'
 
-    $output = Join-Path $RepoRoot 'dist/server'
     $targetOS = if ($env:WORKSENTRY_SERVER_GOOS) { $env:WORKSENTRY_SERVER_GOOS } else { 'linux' }
     $targetArch = if ($env:WORKSENTRY_SERVER_GOARCH) { $env:WORKSENTRY_SERVER_GOARCH } else { 'amd64' }
+
+    $outputBase = Join-Path $RepoRoot 'dist/server'
+    $output = if ($targetOS -eq 'windows') { "$outputBase.exe" } else { $outputBase }
+
+    # 避免 dist 里残留 .exe 导致误判
+    if ($targetOS -eq 'windows') {
+        if (Test-Path -LiteralPath $outputBase) {
+            Remove-Item -LiteralPath $outputBase -Force
+        }
+    } else {
+        $winExe = "$outputBase.exe"
+        if (Test-Path -LiteralPath $winExe) {
+            Remove-Item -LiteralPath $winExe -Force
+        }
+    }
+
     $originOS = $env:GOOS
     $originArch = $env:GOARCH
+    $originCgo = $env:CGO_ENABLED
     $env:GOOS = $targetOS
     $env:GOARCH = $targetArch
+    $env:CGO_ENABLED = '0'
     try {
         go build -trimpath -ldflags "-s -w" -o $output ./cmd/server
     } finally {
         $env:GOOS = $originOS
         $env:GOARCH = $originArch
+        $env:CGO_ENABLED = $originCgo
     }
 
     Write-Host "输出: $output ($targetOS/$targetArch)" -ForegroundColor Green
 }
-
 function Build-WebFrontend {
     Write-Step '编译网页前端 (静态资源)'
 
@@ -322,4 +339,5 @@ while ($true) {
     $Target = ''
     Wait-ReturnToMenu
 }
+
 

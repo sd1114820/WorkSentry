@@ -54,8 +54,8 @@ internal sealed class TrayManager : IDisposable
         _mainWindow.LoadConfig(_config);
         _mainWindow.SaveConfigRequested += OnSaveConfig;
         _mainWindow.StartRequested += async () => await StartWorkingAsync();
-        _mainWindow.StopRequested += StopWorking;
-        _mainWindow.ExitRequested += Exit;
+        _mainWindow.StopRequested += async () => await StopWorkingAsync();
+        _mainWindow.ExitRequested += async () => await RequestExitAsync();
         _mainWindow.UpdateNowRequested += () => _ = Task.Run(HandleUpdateNowAsync);
         _mainWindow.UpdateLaterRequested += HandleUpdateLater;
         _mainWindow.LanguageChangedRequested += OnLanguageChangedRequested;
@@ -95,10 +95,10 @@ internal sealed class TrayManager : IDisposable
         var menu = new Forms.ContextMenuStrip();
         _statusItem = new Forms.ToolStripMenuItem(string.Empty) { Enabled = false };
         _startWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await StartWorkingAsync());
-        _stopWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => StopWorking()) { Enabled = false };
+        _stopWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await StopWorkingAsync()) { Enabled = false };
         _reportItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => _reportManager?.RequestImmediateReport()) { Enabled = false };
         _openMainItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => ShowMainWindow());
-        _exitItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => Exit());
+        _exitItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await RequestExitAsync());
 
         menu.Items.Add(_statusItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -294,6 +294,15 @@ internal sealed class TrayManager : IDisposable
                 return;
             }
 
+            var startResult = await _reportManager.SendWorkStartAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!startResult)
+            {
+                InvokeOnUi(() =>
+                {
+                    System.Windows.MessageBox.Show(LanguageService.GetString("MsgWorkStartFailed"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
+                return;
+            }
             await _reportManager.StartAsync().ConfigureAwait(false);
             _isWorking = true;
             InvokeOnUi(() =>
@@ -316,14 +325,27 @@ internal sealed class TrayManager : IDisposable
         }
     }
 
-    private void StopWorking()
+    private async Task<bool> StopWorkingAsync()
     {
         if (!_isWorking)
         {
-            return;
+            return true;
         }
 
-        _reportManager?.Stop();
+        if (_reportManager != null)
+        {
+            var stopResult = await _reportManager.SendWorkEndAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!stopResult)
+            {
+                InvokeOnUi(() =>
+                {
+                    System.Windows.MessageBox.Show(LanguageService.GetString("MsgWorkEndFailed"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
+                return false;
+            }
+            _reportManager.Stop();
+        }
+
         _isWorking = false;
         InvokeOnUi(() =>
         {
@@ -333,6 +355,7 @@ internal sealed class TrayManager : IDisposable
             _mainWindow.SetWorkingState(false);
         });
         UpdateStatus("已下班");
+        return true;
     }
 
     private void EnsureReportManager()
@@ -480,7 +503,7 @@ internal sealed class TrayManager : IDisposable
                     {
                         InvokeOnUi(() => _mainWindow.SetUpdateProgress(failMessage));
                         await Task.Delay(1500).ConfigureAwait(false);
-                        Exit();
+                        ExitInternal();
                         return;
                     }
 
@@ -503,7 +526,7 @@ internal sealed class TrayManager : IDisposable
             {
                 InvokeOnUi(() => _mainWindow.SetUpdateProgress(LanguageService.GetString("UpdateApplyFailedForced")));
                 await Task.Delay(1500).ConfigureAwait(false);
-                Exit();
+                ExitInternal();
                 return;
             }
 
@@ -546,7 +569,27 @@ internal sealed class TrayManager : IDisposable
         }
     }
 
-    private void Exit()
+    private async Task RequestExitAsync()
+    {
+        if (_isWorking)
+        {
+            var result = System.Windows.MessageBox.Show(LanguageService.GetString("MsgExitNeedStop"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.OK)
+            {
+                return;
+            }
+
+            var stopped = await StopWorkingAsync().ConfigureAwait(false);
+            if (!stopped)
+            {
+                return;
+            }
+        }
+
+        ExitInternal();
+    }
+
+    private void ExitInternal()
     {
         _allowExit = true;
         _reportManager?.Stop();
@@ -559,6 +602,7 @@ internal sealed class TrayManager : IDisposable
         System.Windows.Application.Current.Shutdown();
     }
 }
+
 
 
 
