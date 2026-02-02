@@ -1,7 +1,7 @@
 <Window x:Class="WorkSentry.Client.CloseToTrayTipWindow" x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="提示"
+        Title="{DynamicResource DialogTitleTip}"
         Width="420"
         MinHeight="240"
         SizeToContent="Height"
@@ -23,12 +23,12 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock Text="已最小化到托盘" FontSize="18" FontWeight="SemiBold" Foreground="#111827" />
-            <TextBlock Grid.Row="1" Text="关闭窗口将最小化到托盘，可在托盘右键退出。" Margin="0,8,0,0" FontSize="13" Foreground="#4B5563" TextWrapping="Wrap" />
+            <TextBlock Text="{DynamicResource CloseToTrayTitle}" FontSize="18" FontWeight="SemiBold" Foreground="#111827" />
+            <TextBlock Grid.Row="1" Text="{DynamicResource CloseToTrayContent}" Margin="0,8,0,0" FontSize="13" Foreground="#4B5563" TextWrapping="Wrap" />
 
-            <CheckBox x:Name="RememberCheck" Grid.Row="2" Content="记住，不再提示" Foreground="#374151" FontSize="12" Margin="0,14,0,0" />
+            <CheckBox x:Name="RememberCheck" Grid.Row="2" Content="{DynamicResource CloseToTrayRemember}" Foreground="#374151" FontSize="12" Margin="0,14,0,0" />
 
-            <Button x:Name="OkButton" Grid.Row="3" Content="确定" Width="96" Height="36" Margin="0,18,0,0"
+            <Button x:Name="OkButton" Grid.Row="3" Content="{DynamicResource CloseToTrayOk}" Width="96" Height="36" Margin="0,18,0,0"
                     HorizontalAlignment="Right" Background="#2563EB" Foreground="White" BorderBrush="#2563EB"
                     FontWeight="SemiBold" />
         </Grid>

@@ -3,7 +3,9 @@ using System.Windows;
 using MediaBrush = System.Windows.Media.Brush;
 using MediaColor = System.Windows.Media.Color;
 using MediaSolidColorBrush = System.Windows.Media.SolidColorBrush;
+
 namespace WorkSentry.Client;
+
 internal sealed partial class MainWindow : Window
 {
     private static readonly MediaBrush WorkingForeground = new MediaSolidColorBrush(MediaColor.FromRgb(22, 163, 74));
@@ -26,12 +28,29 @@ internal sealed partial class MainWindow : Window
     private static readonly MediaBrush PolicyHintForeground = new MediaSolidColorBrush(MediaColor.FromRgb(55, 65, 81));
     private static readonly MediaBrush PolicyForceBackground = new MediaSolidColorBrush(MediaColor.FromRgb(254, 226, 226));
     private static readonly MediaBrush PolicyForceForeground = new MediaSolidColorBrush(MediaColor.FromRgb(185, 28, 28));
+
+    private string _currentStatusToken = "待上班";
+    private DateTime? _lastReportTime;
+    private int _lastUpdatePolicy;
+    private string _lastLatestVersion = string.Empty;
+    private bool _languageInitializing;
+    private bool _showingPrompt;
+    private bool _updatePromptForced;
+    private string? _updatePromptVersion;
+    private string? _updatePromptMessageOverride;
+    private bool _updateProgressVisible;
+    private string? _updateProgressStage;
+    private long _updateProgressReceived;
+    private long? _updateProgressTotal;
+
     public event Action<string>? SaveConfigRequested;
     public event Action? StartRequested;
     public event Action? StopRequested;
     public event Action? ExitRequested;
     public event Action? UpdateNowRequested;
     public event Action? UpdateLaterRequested;
+    public event Action<string>? LanguageChangedRequested;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -43,23 +62,84 @@ internal sealed partial class MainWindow : Window
         ExitButton.Click += (_, _) => ExitRequested?.Invoke();
         UpdateNowButton.Click += (_, _) => UpdateNowRequested?.Invoke();
         UpdateLaterButton.Click += (_, _) => UpdateLaterRequested?.Invoke();
+        LanguageComboBox.SelectionChanged += (_, _) => HandleLanguageSelection();
     }
+
+    private void HandleLanguageSelection()
+    {
+        if (_languageInitializing)
+        {
+            return;
+        }
+        var selected = LanguageComboBox.SelectedValue?.ToString() ?? LanguageService.Auto;
+        LanguageChangedRequested?.Invoke(selected);
+    }
+
     private void SaveConfig()
     {
         var code = EmployeeCodeBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(code))
         {
-            System.Windows.MessageBox.Show("工号不能为空", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(LanguageService.GetString("MsgEmployeeCodeEmpty"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Information);
             EmployeeCodeBox.Focus();
             return;
         }
         SaveConfigRequested?.Invoke(code);
     }
+
     internal void LoadConfig(AppConfig config)
     {
         EmployeeCodeBox.Text = config.EmployeeCode;
+        SetLanguageSelection(config.LanguageOverride);
         UpdateUpdateInfo(config.UpdatePolicy, config.LatestVersion);
     }
+
+    private void SetLanguageSelection(string? overrideValue)
+    {
+        _languageInitializing = true;
+        LanguageComboBox.SelectedValue = NormalizeLanguageOption(overrideValue);
+        _languageInitializing = false;
+    }
+
+    private static string NormalizeLanguageOption(string? overrideValue)
+    {
+        if (string.IsNullOrWhiteSpace(overrideValue) || string.Equals(overrideValue, LanguageService.Auto, StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguageService.Auto;
+        }
+        if (overrideValue.StartsWith("vi", StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguageService.ViVn;
+        }
+        if (overrideValue.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguageService.EnUs;
+        }
+        if (overrideValue.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return LanguageService.ZhCn;
+        }
+        return LanguageService.Auto;
+    }
+
+    internal void RefreshLanguage()
+    {
+        UpdateStatus(_currentStatusToken);
+        UpdateUpdateInfo(_lastUpdatePolicy, _lastLatestVersion);
+        if (_lastReportTime.HasValue)
+        {
+            UpdateLastReport(_lastReportTime);
+        }
+        if (_showingPrompt)
+        {
+            ShowUpdatePrompt(_updatePromptForced, _updatePromptVersion, _updatePromptMessageOverride);
+        }
+        else if (_updateProgressVisible && !string.IsNullOrWhiteSpace(_updateProgressStage))
+        {
+            UpdateDownloadProgress(_updateProgressStage, _updateProgressReceived, _updateProgressTotal);
+        }
+    }
+
     internal void SetWorkingState(bool working)
     {
         StartButton.IsEnabled = !working;
@@ -71,18 +151,22 @@ internal sealed partial class MainWindow : Window
         UpdateStatus(working ? "已上班" : "待上班");
         if (!working)
         {
-            LastReportText.Text = "-";
+            _lastReportTime = null;
+            LastReportText.Text = LanguageService.GetString("LastReportPlaceholder");
         }
     }
+
     internal void UpdateStatus(string status)
     {
-        StatusValueText.Text = status;
+        _currentStatusToken = status;
+        StatusValueText.Text = LanguageService.GetStatusDisplay(status);
         var (fg, cardBg, cardBorder, icon) = status switch
         {
             "已上班" => (WorkingForeground, WorkingCardBackground, WorkingCardBorder, WorkingIcon),
             "网络异常" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
             "已下班" => (OffForeground, OffCardBackground, OffCardBorder, OffIcon),
             "连接中" => (IdleForeground, IdleCardBackground, IdleCardBorder, IdleIcon),
+            "需要更新" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
             _ => (IdleForeground, IdleCardBackground, IdleCardBorder, IdleIcon)
         };
         StatusValueText.Foreground = fg;
@@ -91,79 +175,99 @@ internal sealed partial class MainWindow : Window
         StatusIconText.Foreground = icon;
         if (status == "连接中")
         {
-            LastReportText.Text = "正在连接服务端...";
+            LastReportText.Text = LanguageService.GetString("LastReportConnecting");
         }
         else if (status == "网络异常")
         {
-            LastReportText.Text = "无法连接服务端，正在重试...";
+            LastReportText.Text = LanguageService.GetString("LastReportNetwork");
         }
-        if (status == "已上班" && LastReportText.Text == "-")
+        else if (status == "已上班" && !_lastReportTime.HasValue)
         {
-            LastReportText.Text = "正在监控中...";
+            LastReportText.Text = LanguageService.GetString("LastReportMonitoring");
         }
     }
+
     internal void UpdateLastReport(DateTime? time)
     {
+        _lastReportTime = time;
         if (time.HasValue)
         {
-            LastReportText.Text = $"最后上报: {time.Value:HH:mm:ss}";
+            LastReportText.Text = LanguageService.Format("LastReportFormat", time.Value.ToString("HH:mm:ss"));
         }
     }
+
     internal void UpdateUpdateInfo(int updatePolicy, string latestVersion)
     {
+        _lastUpdatePolicy = updatePolicy;
+        _lastLatestVersion = latestVersion;
         LatestVersionText.Text = string.IsNullOrWhiteSpace(latestVersion) ? "-" : latestVersion;
         if (updatePolicy == 1)
         {
-            UpdatePolicyText.Text = "强制更新";
+            UpdatePolicyText.Text = LanguageService.GetString("UpdatePolicyForce");
             UpdatePolicyBadge.Background = PolicyForceBackground;
             UpdatePolicyText.Foreground = PolicyForceForeground;
         }
         else
         {
-            UpdatePolicyText.Text = "提示更新";
+            UpdatePolicyText.Text = LanguageService.GetString("UpdatePolicyHint");
             UpdatePolicyBadge.Background = PolicyHintBackground;
             UpdatePolicyText.Foreground = PolicyHintForeground;
         }
     }
+
     internal void ShowUpdatePrompt(bool forced, string? version, string? messageOverride = null)
     {
+        _showingPrompt = true;
+        _updatePromptForced = forced;
+        _updatePromptVersion = version ?? string.Empty;
+        _updatePromptMessageOverride = messageOverride;
         var versionText = string.IsNullOrWhiteSpace(version) ? string.Empty : $" {version}";
-        var message = messageOverride ?? (forced
-            ? $"检测到新版本{versionText}，需要强制更新才能继续使用。"
-            : $"检测到新版本{versionText}，是否立即更新？");
+        var message = messageOverride ?? LanguageService.Format(forced ? "UpdateMessageForced" : "UpdateMessageOptional", versionText);
         ResetUpdateProgress();
-        UpdateTitleText.Text = forced ? "强制更新" : "发现新版本";
+        UpdateTitleText.Text = LanguageService.GetString(forced ? "UpdateTitleForced" : "UpdateTitleOptional");
         UpdateMessageText.Text = message;
         UpdateLaterButton.Visibility = forced ? Visibility.Collapsed : Visibility.Visible;
         UpdateLaterButton.IsEnabled = !forced;
-        UpdateNowButton.Content = forced ? "确定" : "更新";
+        UpdateNowButton.Content = LanguageService.GetString(forced ? "UpdateNowForcedButton" : "UpdateNowButton");
         UpdateNowButton.IsEnabled = true;
         UpdateOverlay.Visibility = Visibility.Visible;
     }
+
     internal void SetUpdateProgress(string message)
     {
+        _showingPrompt = false;
+        _updateProgressVisible = false;
+        _updateProgressStage = null;
         UpdateMessageText.Text = message;
         UpdateNowButton.IsEnabled = false;
         UpdateLaterButton.IsEnabled = false;
         UpdateOverlay.Visibility = Visibility.Visible;
     }
+
     internal void UpdateDownloadProgress(string stage, long receivedBytes, long? totalBytes)
     {
+        _showingPrompt = false;
+        _updateProgressVisible = true;
+        _updateProgressStage = stage;
+        _updateProgressReceived = receivedBytes;
+        _updateProgressTotal = totalBytes;
         UpdateProgressBar.Visibility = Visibility.Visible;
         UpdateProgressText.Visibility = Visibility.Visible;
+        var displayStage = LanguageService.TranslateUpdateStage(stage);
         if (totalBytes.HasValue && totalBytes.Value > 0)
         {
             UpdateProgressBar.IsIndeterminate = false;
             var percent = Math.Min(100, Math.Round(receivedBytes * 100d / totalBytes.Value, 1));
             UpdateProgressBar.Value = percent;
-            UpdateProgressText.Text = $"{stage}：{FormatBytes(receivedBytes)} / {FormatBytes(totalBytes.Value)}（{percent:0.0}%）";
+            UpdateProgressText.Text = LanguageService.Format("UpdateProgressDetail", displayStage, FormatBytes(receivedBytes), FormatBytes(totalBytes.Value), percent);
         }
         else
         {
             UpdateProgressBar.IsIndeterminate = true;
-            UpdateProgressText.Text = $"{stage}：已下载 {FormatBytes(receivedBytes)}";
+            UpdateProgressText.Text = LanguageService.Format("UpdateProgressDetailNoTotal", displayStage, FormatBytes(receivedBytes));
         }
     }
+
     private void ResetUpdateProgress()
     {
         UpdateProgressBar.Visibility = Visibility.Collapsed;
@@ -171,7 +275,12 @@ internal sealed partial class MainWindow : Window
         UpdateProgressBar.IsIndeterminate = false;
         UpdateProgressBar.Value = 0;
         UpdateProgressText.Text = string.Empty;
+        _updateProgressVisible = false;
+        _updateProgressStage = null;
+        _updateProgressReceived = 0;
+        _updateProgressTotal = null;
     }
+
     private static string FormatBytes(long bytes)
     {
         const double kb = 1024d;
@@ -191,13 +300,15 @@ internal sealed partial class MainWindow : Window
         }
         return $"{bytes} B";
     }
+
     internal void HideUpdatePrompt()
     {
+        _showingPrompt = false;
         UpdateOverlay.Visibility = Visibility.Collapsed;
     }
+
     internal void FocusEmployeeCode()
     {
         EmployeeCodeBox.Focus();
-        EmployeeCodeBox.SelectAll();
     }
 }

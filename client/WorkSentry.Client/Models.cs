@@ -14,6 +14,7 @@ internal sealed class AppConfig
     public string LatestVersion { get; set; } = "";
     public string UpdateUrl { get; set; } = "";
     public bool SuppressCloseTip { get; set; } = false;
+    public string LanguageOverride { get; set; } = "";
     public DateTime? LastConfigAt { get; set; }
 }
 

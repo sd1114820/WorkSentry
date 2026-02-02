@@ -10,6 +10,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        ApplyStartupLanguage();
         if (!EnsureSingleInstance())
         {
             return;
@@ -29,6 +30,19 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
+    private void ApplyStartupLanguage()
+    {
+        try
+        {
+            var config = new ConfigStore().Load();
+            LanguageService.ApplyLanguage(LanguageService.ResolveLanguage(config));
+        }
+        catch
+        {
+            LanguageService.ApplyLanguage(LanguageService.DetectSystemLanguage());
+        }
+    }
+
     private bool EnsureSingleInstance()
     {
         _instanceMutex = new Mutex(true, "Local\\WorkSentry.Client.SingleInstance", out var createdNew);
@@ -37,9 +51,8 @@ public partial class App : System.Windows.Application
             return true;
         }
 
-        System.Windows.MessageBox.Show("客户端已在运行，请勿重复启动。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+        System.Windows.MessageBox.Show(LanguageService.GetString("MsgSingleInstance"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Information);
         Shutdown();
         return false;
     }
 }
-

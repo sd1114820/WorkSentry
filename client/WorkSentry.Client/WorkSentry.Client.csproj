@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>WorkSentry.Client</AssemblyName>
     <RootNamespace>WorkSentry.Client</RootNamespace>
-    <Version>1.1.9</Version>
+    <Version>1.1.10</Version>
     <ApplicationIcon>Assets\WorkSentry.ico</ApplicationIcon>
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
@@ -19,6 +19,7 @@
     <Resource Include="Assets\WorkSentry.ico" />
   </ItemGroup>
 </Project>
+
 
 
 

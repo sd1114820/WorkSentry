@@ -21,6 +21,8 @@ internal sealed class TrayManager : IDisposable
     private readonly Forms.ToolStripMenuItem _startWorkItem;
     private readonly Forms.ToolStripMenuItem _stopWorkItem;
     private readonly Forms.ToolStripMenuItem _reportItem;
+    private readonly Forms.ToolStripMenuItem _openMainItem;
+    private readonly Forms.ToolStripMenuItem _exitItem;
     private readonly MainWindow _mainWindow;
     private AppConfig _config;
     private ReportManager? _reportManager;
@@ -32,6 +34,7 @@ internal sealed class TrayManager : IDisposable
     private bool _isWorking;
     private bool _isStarting;
     private bool _allowExit;
+    private string _currentStatusToken = "待上班";
 
     public TrayManager(Dispatcher dispatcher)
     {
@@ -40,6 +43,8 @@ internal sealed class TrayManager : IDisposable
         _config = _configStore.Load();
         _tokenStore = new TokenStore(_configStore.BaseDirectory);
         _logger = new Logger(_configStore.BaseDirectory);
+
+        LanguageService.ApplyLanguage(LanguageService.ResolveLanguage(_config));
 
         _updateManager = new UpdateManager(_configStore.BaseDirectory, _logger);
         _updateManager.PrepareWorkspace();
@@ -53,6 +58,7 @@ internal sealed class TrayManager : IDisposable
         _mainWindow.ExitRequested += Exit;
         _mainWindow.UpdateNowRequested += () => _ = Task.Run(HandleUpdateNowAsync);
         _mainWindow.UpdateLaterRequested += HandleUpdateLater;
+        _mainWindow.LanguageChangedRequested += OnLanguageChangedRequested;
         _mainWindow.Closing += (_, e) =>
         {
             if (!_allowExit)
@@ -83,16 +89,16 @@ internal sealed class TrayManager : IDisposable
         {
             Icon = appIcon,
             Visible = true,
-            Text = "WorkSentry 客户端"
+            Text = LanguageService.GetString("TrayTooltip")
         };
 
         var menu = new Forms.ContextMenuStrip();
-        _statusItem = new Forms.ToolStripMenuItem("状态：待上班") { Enabled = false };
-        _startWorkItem = new Forms.ToolStripMenuItem("开始上班", null, async (_, _) => await StartWorkingAsync());
-        _stopWorkItem = new Forms.ToolStripMenuItem("下班", null, (_, _) => StopWorking()) { Enabled = false };
-        _reportItem = new Forms.ToolStripMenuItem("立即上报", null, (_, _) => _reportManager?.RequestImmediateReport()) { Enabled = false };
-        var openMainItem = new Forms.ToolStripMenuItem("打开主界面", null, (_, _) => ShowMainWindow());
-        var exitItem = new Forms.ToolStripMenuItem("退出", null, (_, _) => Exit());
+        _statusItem = new Forms.ToolStripMenuItem(string.Empty) { Enabled = false };
+        _startWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await StartWorkingAsync());
+        _stopWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => StopWorking()) { Enabled = false };
+        _reportItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => _reportManager?.RequestImmediateReport()) { Enabled = false };
+        _openMainItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => ShowMainWindow());
+        _exitItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => Exit());
 
         menu.Items.Add(_statusItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -100,9 +106,9 @@ internal sealed class TrayManager : IDisposable
         menu.Items.Add(_stopWorkItem);
         menu.Items.Add(_reportItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(openMainItem);
+        menu.Items.Add(_openMainItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(exitItem);
+        menu.Items.Add(_exitItem);
         _notifyIcon.ContextMenuStrip = menu;
 
         _notifyIcon.DoubleClick += (_, _) => ShowMainWindow();
@@ -115,6 +121,9 @@ internal sealed class TrayManager : IDisposable
             ShowMainWindow();
             InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(_pendingUpdateForced, _pendingUpdateVersion));
         };
+
+        ApplyTrayLocalization();
+        LanguageService.LanguageChanged += HandleLanguageChanged;
 
         _ = InitializeAsync();
     }
@@ -139,6 +148,41 @@ internal sealed class TrayManager : IDisposable
         await CheckUpdateOnStartupAsync().ConfigureAwait(false);
     }
 
+    private void ApplyTrayLocalization()
+    {
+        _notifyIcon.Text = LanguageService.GetString("TrayTooltip");
+        _statusItem.Text = LanguageService.Format("TrayStatusFormat", LanguageService.GetStatusDisplay(_currentStatusToken));
+        _startWorkItem.Text = LanguageService.GetString("TrayStartWork");
+        _stopWorkItem.Text = LanguageService.GetString("TrayStopWork");
+        _reportItem.Text = LanguageService.GetString("TrayReportNow");
+        if (_openMainItem != null)
+        {
+            _openMainItem.Text = LanguageService.GetString("TrayOpenMain");
+        }
+        if (_exitItem != null)
+        {
+            _exitItem.Text = LanguageService.GetString("TrayExit");
+        }
+    }
+
+    private void HandleLanguageChanged()
+    {
+        InvokeOnUi(() =>
+        {
+            ApplyTrayLocalization();
+            _mainWindow.RefreshLanguage();
+        });
+    }
+
+    private void OnLanguageChangedRequested(string languageCode)
+    {
+        _config.LanguageOverride = string.IsNullOrWhiteSpace(languageCode) ? LanguageService.Auto : languageCode;
+        _configStore.Save(_config);
+        LanguageService.ApplyLanguage(LanguageService.ResolveLanguage(_config));
+        ApplyTrayLocalization();
+        _mainWindow.RefreshLanguage();
+    }
+
     private void ShowCloseToTrayTip()
     {
         try
@@ -156,7 +200,7 @@ internal sealed class TrayManager : IDisposable
         }
         catch
         {
-            System.Windows.MessageBox.Show("关闭窗口将最小化到托盘，可在托盘右键退出。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(LanguageService.GetString("CloseToTrayContent"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -201,7 +245,7 @@ internal sealed class TrayManager : IDisposable
         {
             InvokeOnUi(() =>
             {
-                System.Windows.MessageBox.Show("请先下班再修改工号", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(LanguageService.GetString("MsgNeedStopToEdit"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Information);
             });
             return;
         }
@@ -237,7 +281,7 @@ internal sealed class TrayManager : IDisposable
             {
                 InvokeOnUi(() =>
                 {
-                    System.Windows.MessageBox.Show("请先填写工号", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    System.Windows.MessageBox.Show(LanguageService.GetString("MsgFillEmployeeCode"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Information);
                     _mainWindow.FocusEmployeeCode();
                 });
                 ShowMainWindow();
@@ -264,7 +308,7 @@ internal sealed class TrayManager : IDisposable
         catch (Exception ex)
         {
             _logger.Error(ex.Message);
-            ShowBalloon("启动失败", ex.Message);
+            ShowBalloon(LanguageService.GetString("MsgStartFailedTitle"), ex.Message);
         }
         finally
         {
@@ -324,13 +368,14 @@ internal sealed class TrayManager : IDisposable
 
     private void UpdateStatus(string status)
     {
+        _currentStatusToken = status;
         InvokeOnUi(() =>
         {
             if (_statusItem.GetCurrentParent() == null)
             {
                 return;
             }
-            _statusItem.Text = $"状态：{status}";
+            _statusItem.Text = LanguageService.Format("TrayStatusFormat", LanguageService.GetStatusDisplay(status));
             _mainWindow.UpdateStatus(status);
         });
     }
@@ -387,6 +432,7 @@ internal sealed class TrayManager : IDisposable
         });
         await Task.CompletedTask;
     }
+
     private void HandleUpdateLater()
     {
         if (_pendingUpdateForced)
@@ -424,28 +470,30 @@ internal sealed class TrayManager : IDisposable
             UpdateDownloadResult result = UpdateDownloadResult.Ok(UpdatePackageType.Exe);
             if (!_pendingUpdateReady)
             {
-                InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在下载更新，请稍后..."));
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress(LanguageService.GetString("UpdateProgressDownloading")));
                 result = await _updateManager.DownloadUpdateAsync(_pendingUpdateUrl, progress, CancellationToken.None).ConfigureAwait(false);
                 if (!result.Success)
                 {
+                    var errorText = LanguageService.TranslateUpdateError(result.Error ?? string.Empty);
+                    var failMessage = LanguageService.Format("UpdateDownloadFailed", errorText);
                     if (_pendingUpdateForced)
                     {
-                        InvokeOnUi(() => _mainWindow.SetUpdateProgress($"更新下载失败：{result.Error}"));
+                        InvokeOnUi(() => _mainWindow.SetUpdateProgress(failMessage));
                         await Task.Delay(1500).ConfigureAwait(false);
                         Exit();
                         return;
                     }
 
-                    InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, $"更新下载失败：{result.Error}"));
+                    InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, failMessage));
                     return;
                 }
             }
 
             _pendingUpdateReady = true;
-            InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在应用更新，稍后自动重启..."));
+            InvokeOnUi(() => _mainWindow.SetUpdateProgress(LanguageService.GetString("UpdateProgressApplying")));
             if (_updateManager.ApplyPendingUpdate())
             {
-                InvokeOnUi(() => _mainWindow.SetUpdateProgress("正在重启，请稍候..."));
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress(LanguageService.GetString("UpdateProgressRestarting")));
                 await Task.Delay(300).ConfigureAwait(false);
                 Environment.Exit(0);
                 return;
@@ -453,19 +501,20 @@ internal sealed class TrayManager : IDisposable
 
             if (_pendingUpdateForced)
             {
-                InvokeOnUi(() => _mainWindow.SetUpdateProgress("启动更新失败，程序将退出。"));
+                InvokeOnUi(() => _mainWindow.SetUpdateProgress(LanguageService.GetString("UpdateApplyFailedForced")));
                 await Task.Delay(1500).ConfigureAwait(false);
                 Exit();
                 return;
             }
 
-            InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, "启动更新失败，请稍后重试。"));
+            InvokeOnUi(() => _mainWindow.ShowUpdatePrompt(false, _pendingUpdateVersion, LanguageService.GetString("UpdateApplyFailed")));
         }
         finally
         {
             _isUpdating = false;
         }
     }
+
     private void InvokeOnUi(Action action)
     {
         if (_dispatcher.CheckAccess())
@@ -503,26 +552,13 @@ internal sealed class TrayManager : IDisposable
         _reportManager?.Stop();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
-        InvokeOnUi(() =>
+        if (_mainWindow.IsVisible)
         {
-            if (_mainWindow.IsVisible)
-            {
-                _mainWindow.Close();
-            }
-            System.Windows.Application.Current.Shutdown();
-        });
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(500);
-            Environment.Exit(0);
-        });
+            _mainWindow.Close();
+        }
+        System.Windows.Application.Current.Shutdown();
     }
 }
-
-
-
-
-
 
 
 
