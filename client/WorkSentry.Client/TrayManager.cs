@@ -259,7 +259,7 @@ internal sealed class TrayManager : IDisposable
                 _reportItem.Enabled = true;
                 _mainWindow.SetWorkingState(true);
             });
-            UpdateStatus("已上班");
+            UpdateStatus("连接中");
         }
         catch (Exception ex)
         {
@@ -304,6 +304,13 @@ internal sealed class TrayManager : IDisposable
             if (status == "已上报")
             {
                 InvokeOnUi(() => _mainWindow.UpdateLastReport(DateTime.Now));
+                UpdateStatus("已上班");
+                return;
+            }
+            if (status == "已绑定")
+            {
+                UpdateStatus("连接中");
+                return;
             }
             UpdateStatus(status);
         };
@@ -511,6 +518,7 @@ internal sealed class TrayManager : IDisposable
         });
     }
 }
+
 
 
 

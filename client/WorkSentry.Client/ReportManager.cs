@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -200,6 +201,18 @@ internal sealed class ReportManager
             _token = null;
             _backoff.RegisterFailure();
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.Warn(ex.Message);
+            _backoff.RegisterFailure();
+            StatusChanged?.Invoke("网络异常");
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.Warn($"请求超时: {ex.Message}");
+            _backoff.RegisterFailure();
+            StatusChanged?.Invoke("网络异常");
+        }
         catch (ApiException ex)
         {
             _logger.Warn(ex.Message);
@@ -262,4 +275,5 @@ internal sealed class ReportManager
         Stop();
     }
 }
+
 
