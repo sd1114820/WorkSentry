@@ -22,6 +22,7 @@ type Querier interface {
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) error
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) error
+	GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error)
 	CreateIncident(ctx context.Context, arg CreateIncidentParams) (sql.Result, error)
 	CreateManualAdjustment(ctx context.Context, arg CreateManualAdjustmentParams) (sql.Result, error)
 	CreateRawEvent(ctx context.Context, arg CreateRawEventParams) error
@@ -76,3 +77,4 @@ type Querier interface {
 }
 
 var _ Querier = (*Queries)(nil)
+

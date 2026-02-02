@@ -156,10 +156,21 @@ function Build-WebBackend {
 
     Ensure-Directory 'dist'
 
-    $output = Join-Path $RepoRoot 'dist/server.exe'
-    go build -trimpath -ldflags "-s -w" -o $output ./cmd/server
+    $output = Join-Path $RepoRoot 'dist/server'
+    $targetOS = if ($env:WORKSENTRY_SERVER_GOOS) { $env:WORKSENTRY_SERVER_GOOS } else { 'linux' }
+    $targetArch = if ($env:WORKSENTRY_SERVER_GOARCH) { $env:WORKSENTRY_SERVER_GOARCH } else { 'amd64' }
+    $originOS = $env:GOOS
+    $originArch = $env:GOARCH
+    $env:GOOS = $targetOS
+    $env:GOARCH = $targetArch
+    try {
+        go build -trimpath -ldflags "-s -w" -o $output ./cmd/server
+    } finally {
+        $env:GOOS = $originOS
+        $env:GOARCH = $originArch
+    }
 
-    Write-Host "输出: $output" -ForegroundColor Green
+    Write-Host "输出: $output ($targetOS/$targetArch)" -ForegroundColor Green
 }
 
 function Build-WebFrontend {

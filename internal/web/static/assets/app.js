@@ -1123,8 +1123,8 @@ async function saveEmployee() {
     departmentId: Number(document.getElementById('employeeDepartment').value || 0),
     enabled: document.getElementById('employeeEnabled').checked,
   };
-  if (!payload.employeeCode || !payload.name) {
-    setStatus('工号与姓名不能为空', document.getElementById('employeeStatus'));
+  if (!payload.name) {
+    setStatus('姓名不能为空', document.getElementById('employeeStatus'));
     return;
   }
   try {

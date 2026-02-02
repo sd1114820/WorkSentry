@@ -11,6 +11,12 @@ LEFT JOIN departments d ON e.department_id = d.id
 WHERE e.employee_code LIKE ? OR e.name LIKE ?
 ORDER BY e.id DESC;
 
+
+-- name: GetMaxAutoEmployeeCodeNumber :one
+SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
+FROM employees
+WHERE employee_code LIKE 'AUTO-%';
+
 -- name: CreateEmployee :exec
 INSERT INTO employees (employee_code, name, department_id, enabled)
 VALUES (?, ?, ?, ?);

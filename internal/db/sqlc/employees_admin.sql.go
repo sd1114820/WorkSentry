@@ -43,6 +43,19 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 	return err
 }
 
+const getMaxAutoEmployeeCodeNumber = `-- name: GetMaxAutoEmployeeCodeNumber :one
+SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
+FROM employees
+WHERE employee_code LIKE 'AUTO-%'
+`
+
+func (q *Queries) GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getMaxAutoEmployeeCodeNumber)
+	var maxNumber int64
+	err := row.Scan(&maxNumber)
+	return maxNumber, err
+}
+
 const listEmployeesAdmin = `-- name: ListEmployeesAdmin :many
 SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at
 FROM employees e

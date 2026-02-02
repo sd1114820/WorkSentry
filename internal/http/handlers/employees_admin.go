@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +32,44 @@ type EmployeeView struct {
 
 type UnbindPayload struct {
 	ID int64 `json:"id"`
+}
+
+const (
+	autoEmployeeCodePrefix = "AUTO-"
+	autoEmployeeCodeStart  = 10001
+)
+
+func (h *Handler) generateAutoEmployeeCode(ctx context.Context) (string, error) {
+	maxNumber, err := h.Queries.GetMaxAutoEmployeeCodeNumber(ctx)
+	if err != nil {
+		return "", err
+	}
+	next := maxNumber + 1
+	if next < autoEmployeeCodeStart {
+		next = autoEmployeeCodeStart
+	}
+	return fmt.Sprintf("%s%05d", autoEmployeeCodePrefix, next), nil
+}
+
+func (h *Handler) ensureEmployeeCode(ctx context.Context, code string) (string, error) {
+	code = strings.TrimSpace(code)
+	if code != "" {
+		return code, nil
+	}
+	for i := 0; i < 5; i++ {
+		generated, err := h.generateAutoEmployeeCode(ctx)
+		if err != nil {
+			return "", err
+		}
+		_, err = h.Queries.GetEmployeeByCode(ctx, generated)
+		if err == sql.ErrNoRows {
+			return generated, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("自动生成工号失败")
 }
 
 func (h *Handler) Employees(w http.ResponseWriter, r *http.Request) {
@@ -134,10 +174,16 @@ func (h *Handler) createEmployee(w http.ResponseWriter, r *http.Request) {
 	}
 	payload.EmployeeCode = strings.TrimSpace(payload.EmployeeCode)
 	payload.Name = strings.TrimSpace(payload.Name)
-	if payload.EmployeeCode == "" || payload.Name == "" {
-		writeError(w, http.StatusBadRequest, "工号与姓名不能为空")
+	if payload.Name == "" {
+		writeError(w, http.StatusBadRequest, "姓名不能为空")
 		return
 	}
+	code, err := h.ensureEmployeeCode(r.Context(), payload.EmployeeCode)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "自动生成工号失败")
+		return
+	}
+	payload.EmployeeCode = code
 
 	if existing, err := h.Queries.GetEmployeeByCode(r.Context(), payload.EmployeeCode); err == nil {
 		if existing.ID > 0 {
@@ -175,10 +221,16 @@ func (h *Handler) updateEmployee(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "员工编号不能为空")
 		return
 	}
-	if payload.EmployeeCode == "" || payload.Name == "" {
-		writeError(w, http.StatusBadRequest, "工号与姓名不能为空")
+	if payload.Name == "" {
+		writeError(w, http.StatusBadRequest, "姓名不能为空")
 		return
 	}
+	code, err := h.ensureEmployeeCode(r.Context(), payload.EmployeeCode)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "自动生成工号失败")
+		return
+	}
+	payload.EmployeeCode = code
 
 	if existing, err := h.Queries.GetEmployeeByCode(r.Context(), payload.EmployeeCode); err == nil {
 		if existing.ID != payload.ID {
