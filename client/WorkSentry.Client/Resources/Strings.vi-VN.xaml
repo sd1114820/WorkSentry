@@ -100,5 +100,9 @@
   <sys:String x:Key="WorkEndReasonPlaceholder">Vui lòng nhập lý do</sys:String>
   <sys:String x:Key="WorkEndReasonConfirm">Xác nhận</sys:String>
   <sys:String x:Key="WorkEndReasonCancel">Quay lại</sys:String>
-  <sys:String x:Key="WorkEndReasonError">Vui lòng nhập lý do</sys:String></ResourceDictionary>
+  <sys:String x:Key="WorkEndReasonError">Vui lòng nhập lý do</sys:String>  <sys:String x:Key="BreakStartButton">Bắt đầu nghỉ</sys:String>
+  <sys:String x:Key="BreakStopButton">Kết thúc nghỉ</sys:String>
+  <sys:String x:Key="TrayBreakStart">Bắt đầu nghỉ</sys:String>
+  <sys:String x:Key="TrayBreakStop">Kết thúc nghỉ</sys:String>
+  <sys:String x:Key="StatusBreak">Đang nghỉ</sys:String></ResourceDictionary>
 
