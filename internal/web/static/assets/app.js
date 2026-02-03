@@ -1092,10 +1092,44 @@ async function loadOfflineSegments() {
   }
 }
 
+function mergeOfflineSegmentsForDisplay(items) {
+  const list = Array.isArray(items) ? items : [];
+  const merged = [];
+
+  for (const item of list) {
+    const durationSeconds = parseClockDurationSeconds(item.duration);
+    const last = merged[merged.length - 1];
+    if (last && last.employeeCode === item.employeeCode && last.endAt === item.startAt) {
+      last.endAt = item.endAt;
+      last.durationSeconds += durationSeconds;
+      continue;
+    }
+
+    merged.push({
+      employeeCode: item.employeeCode,
+      name: item.name,
+      department: item.department,
+      startAt: item.startAt,
+      endAt: item.endAt,
+      durationSeconds: durationSeconds,
+    });
+  }
+
+  return merged.map((item) => ({
+    employeeCode: item.employeeCode,
+    name: item.name,
+    department: item.department,
+    startAt: item.startAt,
+    endAt: item.endAt,
+    duration: formatClockDuration(item.durationSeconds),
+  }));
+}
+
 function renderOfflineSegments(items) {
   const container = document.getElementById('offlineSegmentsTable');
   const headers = ['工号', '姓名', '部门', '开始', '结束', '时长'];
-  const rows = items.map((item) => [
+  const mergedItems = mergeOfflineSegmentsForDisplay(items);
+  const rows = mergedItems.map((item) => [
     '<div class="table-row cols-6">',
     '<div>' + item.employeeCode + '</div>',
     '<div>' + item.name + '</div>',
