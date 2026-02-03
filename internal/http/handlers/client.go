@@ -29,12 +29,19 @@ type ClientBindResponse struct {
 	ServerTime               string `json:"serverTime"`
 }
 
+type ClientCheckoutPayload struct {
+    TemplateID int64             `json:"templateId"`
+    Data       map[string]string `json:"data"`
+}
+
 type ClientReportRequest struct {
-	ProcessName   string `json:"processName"`
-	WindowTitle   string `json:"windowTitle"`
-	IdleSeconds   int32  `json:"idleSeconds"`
-	ClientVersion string `json:"clientVersion"`
-	ReportType    string `json:"reportType"`
+    ProcessName   string `json:"processName"`
+    WindowTitle   string `json:"windowTitle"`
+    IdleSeconds   int32  `json:"idleSeconds"`
+    ClientVersion string `json:"clientVersion"`
+    ReportType    string `json:"reportType"`
+    Checkout      *ClientCheckoutPayload `json:"checkout"`
+    Reason        string `json:"reason"`
 }
 
 type ClientReportResponse struct {
@@ -187,15 +194,22 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.handleWorkSessionReport(r.Context(), employee.ID, payload.ReportType, now); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	reportType := strings.TrimSpace(payload.ReportType)
+	if reportType != "work_end" {
+		if err := h.handleWorkSessionReport(r.Context(), employee.ID, reportType, now); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	rules, _ := h.Queries.ListEnabledRules(r.Context())
 
 	status := determineStatus(payload.IdleSeconds, settings.IdleThresholdSeconds, payload.ProcessName, payload.WindowTitle, rules)
 	description := buildDescription(payload.ProcessName, payload.WindowTitle)
+	if reportType == "break" {
+		status = "break"
+		description = "休息中"
+	}
 
 	prevEvent, prevErr := h.Queries.GetLastRawEventByEmployee(r.Context(), employee.ID)
 
@@ -245,8 +259,13 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		ID:               employee.ID,
 	})
 
-	reportType := strings.TrimSpace(payload.ReportType)
-	isWorking := reportType != "work_end"
+	workEndAccepted := false
+	var workEndErr error
+	if reportType == "work_end" {
+		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(r.Context(), employee, payload, now)
+	}
+
+	isWorking := reportType != "work_end" || !workEndAccepted
 	statusForLive := status
 	descriptionForLive := description
 	if !isWorking {
@@ -269,6 +288,15 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		},
 		Time: formatTime(now),
 	})
+
+	if workEndErr != nil {
+		if typed, ok := workEndErr.(*workEndError); ok {
+			h.writeJSONWithData(w, typed.Status, typed.Message, typed.Code, typed.Data)
+		} else {
+			writeError(w, http.StatusBadRequest, workEndErr.Error())
+		}
+		return
+	}
 
 	writeJSON(w, http.StatusOK, ClientReportResponse{
 		IdleThresholdSeconds:     settings.IdleThresholdSeconds,
@@ -531,6 +559,8 @@ func parseVersionParts(version string) []int {
 	}
 	return values
 }
+
+
 
 
 

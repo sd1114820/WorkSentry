@@ -291,6 +291,7 @@
                         <Button x:Name="ExitButton" Content="{DynamicResource ExitButton}" Style="{StaticResource DangerButton}" VerticalAlignment="Center" Height="38" Padding="20,8" />
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                             <Button x:Name="StopButton" Content="{DynamicResource StopButton}" Style="{StaticResource DangerButton}" Margin="0,0,12,0" IsEnabled="False" Visibility="Collapsed" />
+                            <Button x:Name="BreakButton" Content="{DynamicResource BreakStartButton}" Style="{StaticResource OutlineButton}" Margin="0,0,12,0" IsEnabled="False" Visibility="Collapsed" />
                             <Button x:Name="StartButton" Content="{DynamicResource StartButton}" Style="{StaticResource PrimaryButton}" />
                         </StackPanel>
                     </Grid>

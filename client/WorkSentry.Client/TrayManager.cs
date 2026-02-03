@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
@@ -20,6 +22,7 @@ internal sealed class TrayManager : IDisposable
     private readonly Forms.ToolStripMenuItem _statusItem;
     private readonly Forms.ToolStripMenuItem _startWorkItem;
     private readonly Forms.ToolStripMenuItem _stopWorkItem;
+    private readonly Forms.ToolStripMenuItem _breakItem;
     private readonly Forms.ToolStripMenuItem _reportItem;
     private readonly Forms.ToolStripMenuItem _openMainItem;
     private readonly Forms.ToolStripMenuItem _exitItem;
@@ -32,6 +35,7 @@ internal sealed class TrayManager : IDisposable
     private bool _pendingUpdateReady;
     private bool _isUpdating;
     private bool _isWorking;
+    private bool _isBreaking;
     private bool _isStarting;
     private bool _allowExit;
     private string _currentStatusToken = "待上班";
@@ -55,6 +59,7 @@ internal sealed class TrayManager : IDisposable
         _mainWindow.SaveConfigRequested += OnSaveConfig;
         _mainWindow.StartRequested += async () => await StartWorkingAsync();
         _mainWindow.StopRequested += async () => await StopWorkingAsync();
+        _mainWindow.BreakToggleRequested += async () => await ToggleBreakAsync();
         _mainWindow.ExitRequested += async () => await RequestExitAsync();
         _mainWindow.UpdateNowRequested += () => _ = Task.Run(HandleUpdateNowAsync);
         _mainWindow.UpdateLaterRequested += HandleUpdateLater;
@@ -96,6 +101,7 @@ internal sealed class TrayManager : IDisposable
         _statusItem = new Forms.ToolStripMenuItem(string.Empty) { Enabled = false };
         _startWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await StartWorkingAsync());
         _stopWorkItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await StopWorkingAsync()) { Enabled = false };
+        _breakItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await ToggleBreakAsync()) { Enabled = false };
         _reportItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => _reportManager?.RequestImmediateReport()) { Enabled = false };
         _openMainItem = new Forms.ToolStripMenuItem(string.Empty, null, (_, _) => ShowMainWindow());
         _exitItem = new Forms.ToolStripMenuItem(string.Empty, null, async (_, _) => await RequestExitAsync());
@@ -103,6 +109,7 @@ internal sealed class TrayManager : IDisposable
         menu.Items.Add(_statusItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(_startWorkItem);
+        menu.Items.Add(_breakItem);
         menu.Items.Add(_stopWorkItem);
         menu.Items.Add(_reportItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -154,6 +161,8 @@ internal sealed class TrayManager : IDisposable
         _statusItem.Text = LanguageService.Format("TrayStatusFormat", LanguageService.GetStatusDisplay(_currentStatusToken));
         _startWorkItem.Text = LanguageService.GetString("TrayStartWork");
         _stopWorkItem.Text = LanguageService.GetString("TrayStopWork");
+        _breakItem.Text = _isBreaking ? LanguageService.GetString("TrayBreakStop") : LanguageService.GetString("TrayBreakStart");
+        _breakItem.Enabled = _isWorking;
         _reportItem.Text = LanguageService.GetString("TrayReportNow");
         if (_openMainItem != null)
         {
@@ -305,6 +314,7 @@ internal sealed class TrayManager : IDisposable
             }
             await _reportManager.StartAsync().ConfigureAwait(false);
             _isWorking = true;
+            ApplyBreakState(false, false);
             InvokeOnUi(() =>
             {
                 _startWorkItem.Enabled = false;
@@ -325,6 +335,23 @@ internal sealed class TrayManager : IDisposable
         }
     }
 
+    private async Task ToggleBreakAsync()
+    {
+        if (!_isWorking)
+        {
+            return;
+        }
+
+        EnsureReportManager();
+        if (_reportManager == null)
+        {
+            return;
+        }
+
+        ApplyBreakState(!_isBreaking, true);
+        await Task.CompletedTask;
+    }
+
     private async Task<bool> StopWorkingAsync()
     {
         if (!_isWorking)
@@ -332,14 +359,73 @@ internal sealed class TrayManager : IDisposable
             return true;
         }
 
+        ClientCheckoutPayload? checkoutPayload = null;
         if (_reportManager != null)
         {
-            var stopResult = await _reportManager.SendWorkEndAsync(CancellationToken.None).ConfigureAwait(false);
-            if (!stopResult)
+            CheckoutTemplateResponse? templateResponse = null;
+            try
+            {
+                templateResponse = await _reportManager.GetCheckoutTemplateAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex.Message);
+                InvokeOnUi(() =>
+                {
+                    var message = ex is ApiException ? ex.Message : LanguageService.GetString("MsgCheckoutTemplateFailed");
+                    System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
+                return false;
+            }
+
+            if (templateResponse != null && templateResponse.Exists)
+            {
+                if (templateResponse.Template == null)
+                {
+                    InvokeOnUi(() =>
+                    {
+                        System.Windows.MessageBox.Show(LanguageService.GetString("MsgCheckoutTemplateFailed"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    });
+                    return false;
+                }
+
+                if (templateResponse.Template.Fields == null || templateResponse.Template.Fields.Count == 0)
+                {
+                    checkoutPayload = new ClientCheckoutPayload
+                    {
+                        TemplateId = templateResponse.Template.TemplateId
+                    };
+                }
+                else
+                {
+                    var checkoutResult = await ShowCheckoutDialogAsync(templateResponse.Template).ConfigureAwait(false);
+                    if (checkoutResult == null)
+                    {
+                        return false;
+                    }
+                    checkoutPayload = checkoutResult;
+                }
+            }
+
+            var stopResult = await _reportManager.SendWorkEndAsync(checkoutPayload, null, CancellationToken.None).ConfigureAwait(false);
+            if (!stopResult.Success && string.Equals(stopResult.ErrorCode, "need_reason", StringComparison.OrdinalIgnoreCase))
+            {
+                var reason = await ShowWorkEndReasonDialogAsync(stopResult.ErrorData).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(reason))
+                {
+                    return false;
+                }
+                stopResult = await _reportManager.SendWorkEndAsync(checkoutPayload, reason, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            if (!stopResult.Success)
             {
                 InvokeOnUi(() =>
                 {
-                    System.Windows.MessageBox.Show(LanguageService.GetString("MsgWorkEndFailed"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    var message = string.IsNullOrWhiteSpace(stopResult.Error)
+                        ? LanguageService.GetString("MsgWorkEndFailed")
+                        : stopResult.Error!;
+                    System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 });
                 return false;
             }
@@ -347,15 +433,81 @@ internal sealed class TrayManager : IDisposable
         }
 
         _isWorking = false;
+        ApplyBreakState(false, false);
         InvokeOnUi(() =>
         {
             _startWorkItem.Enabled = true;
             _stopWorkItem.Enabled = false;
+            _breakItem.Enabled = false;
             _reportItem.Enabled = false;
             _mainWindow.SetWorkingState(false);
         });
         UpdateStatus("已下班");
         return true;
+    }
+
+    private Task<ClientCheckoutPayload?> ShowCheckoutDialogAsync(CheckoutTemplate template)
+    {
+        var tcs = new TaskCompletionSource<ClientCheckoutPayload?>();
+        InvokeOnUi(() =>
+        {
+            var dialog = new CheckoutFormWindow(template)
+            {
+                Owner = _mainWindow
+            };
+            var result = dialog.ShowDialog();
+            if (result == true && dialog.Result != null)
+            {
+                tcs.TrySetResult(dialog.Result);
+                return;
+            }
+            tcs.TrySetResult(null);
+        });
+        return tcs.Task;
+    }
+
+    private Task<string?> ShowWorkEndReasonDialogAsync(JsonElement? data)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+        InvokeOnUi(() =>
+        {
+            var messages = ExtractViolationMessages(data);
+            var dialog = new WorkEndReasonWindow(messages)
+            {
+                Owner = _mainWindow
+            };
+            var result = dialog.ShowDialog();
+            if (result == true && !string.IsNullOrWhiteSpace(dialog.Reason))
+            {
+                tcs.TrySetResult(dialog.Reason);
+                return;
+            }
+            tcs.TrySetResult(null);
+        });
+        return tcs.Task;
+    }
+
+    private static List<string> ExtractViolationMessages(JsonElement? data)
+    {
+        var results = new List<string>();
+        if (data.HasValue && data.Value.ValueKind == JsonValueKind.Object)
+        {
+            if (data.Value.TryGetProperty("violations", out var violations) && violations.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in violations.EnumerateArray())
+                {
+                    if (item.TryGetProperty("message", out var msg))
+                    {
+                        var text = msg.GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            results.Add(text);
+                        }
+                    }
+                }
+            }
+        }
+        return results;
     }
 
     private void EnsureReportManager()
@@ -389,17 +541,35 @@ internal sealed class TrayManager : IDisposable
         };
     }
 
+
+    private void ApplyBreakState(bool isBreaking, bool updateStatus)
+    {
+        _isBreaking = isBreaking;
+        _reportManager?.SetBreakState(isBreaking);
+        _breakItem.Text = isBreaking ? LanguageService.GetString("TrayBreakStop") : LanguageService.GetString("TrayBreakStart");
+        _breakItem.Enabled = _isWorking;
+        InvokeOnUi(() => _mainWindow.SetBreakState(isBreaking));
+        if (updateStatus)
+        {
+            UpdateStatus(isBreaking ? "休息中" : "已上班");
+        }
+    }
     private void UpdateStatus(string status)
     {
-        _currentStatusToken = status;
+        var displayStatus = status;
+        if (_isBreaking && (status == "已上班" || status == "连接中" || status == "已上报"))
+        {
+            displayStatus = "休息中";
+        }
+        _currentStatusToken = displayStatus;
         InvokeOnUi(() =>
         {
             if (_statusItem.GetCurrentParent() == null)
             {
                 return;
             }
-            _statusItem.Text = LanguageService.Format("TrayStatusFormat", LanguageService.GetStatusDisplay(status));
-            _mainWindow.UpdateStatus(status);
+            _statusItem.Text = LanguageService.Format("TrayStatusFormat", LanguageService.GetStatusDisplay(displayStatus));
+            _mainWindow.UpdateStatus(displayStatus);
         });
     }
 

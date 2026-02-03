@@ -47,8 +47,10 @@
         <button class='nav-item is-active' data-target='live'>实时监控</button>
         <button class='nav-item' data-target='rules'>规则配置</button>
         <button class='nav-item' data-target='reports'>数据报表</button>
+        <button class='nav-item' data-target='attendance'>工时考核</button>
         <button class='nav-item' data-target='audit'>异常与审计</button>
         <button class='nav-item' data-target='org'>组织与员工</button>
+        <button class='nav-item' data-target='checkout'>下班录入</button>
       </nav>
       <div class='sidebar-footer'>
         <div class='status-pill'>连接状态：<span id='connectionStatus'>待连接</span></div>
@@ -268,6 +270,135 @@
         </div>
       </section>
 
+            <section class='section' id='section-attendance'>
+        <div class='section-header'>
+          <div>
+            <h2>工时与休息考核</h2>
+            <p class='muted'>按部门配置工时标准、休息规则与状态阈值</p>
+          </div>
+        </div>
+        <div class='grid-2'>
+          <div class='card'>
+            <h3>部门规则配置</h3>
+            <div class='form-grid'>
+              <label class='full'>
+                <span>部门</span>
+                <select id='attendanceDepartment'></select>
+              </label>
+              <label>
+                <span>目标工时（小时）</span>
+                <input type='number' id='attendanceTargetHours' min='0' />
+              </label>
+              <label>
+                <span>目标工时（分钟）</span>
+                <input type='number' id='attendanceTargetMinutes' min='0' max='59' />
+              </label>
+              <label>
+                <span>休息总时长（小时）</span>
+                <input type='number' id='attendanceBreakHours' min='0' />
+              </label>
+              <label>
+                <span>休息总时长（分钟）</span>
+                <input type='number' id='attendanceBreakMinutes' min='0' max='59' />
+              </label>
+              <label>
+                <span>休息次数上限</span>
+                <input type='number' id='attendanceBreakCount' min='0' />
+              </label>
+              <label>
+                <span>单次休息上限（小时）</span>
+                <input type='number' id='attendanceBreakSingleHours' min='0' />
+              </label>
+              <label>
+                <span>单次休息上限（分钟）</span>
+                <input type='number' id='attendanceBreakSingleMinutes' min='0' max='59' />
+              </label>
+              <label class='inline full'>
+                <input type='checkbox' id='attendanceEnabled' checked />
+                <span>启用该部门考核</span>
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='saveAttendanceRule'>保存规则</button>
+              <span class='form-status' id='attendanceStatus'></span>
+            </div>
+          </div>
+          <div class='card'>
+            <h3>状态阈值</h3>
+            <div class='form-grid'>
+              <label>
+                <span>状态</span>
+                <select id='attendanceStatusCode'></select>
+              </label>
+              <label>
+                <span>最小阈值（小时）</span>
+                <input type='number' id='attendanceMinHours' min='0' />
+              </label>
+              <label>
+                <span>最小阈值（分钟）</span>
+                <input type='number' id='attendanceMinMinutes' min='0' max='59' />
+              </label>
+              <label>
+                <span>最大阈值（小时）</span>
+                <input type='number' id='attendanceMaxHours' min='0' />
+              </label>
+              <label>
+                <span>最大阈值（分钟）</span>
+                <input type='number' id='attendanceMaxMinutes' min='0' max='59' />
+              </label>
+              <label>
+                <span>触发处理</span>
+                <select id='attendanceTriggerAction'>
+                  <option value='show_only'>仅后台显示</option>
+                  <option value='require_reason'>下班需要补录原因</option>
+                </select>
+              </label>
+              <label class='inline full'>
+                <input type='checkbox' id='attendanceThresholdEnabled' checked />
+                <span>启用该阈值</span>
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='saveAttendanceThreshold'>保存阈值</button>
+              <button class='btn btn-secondary' id='resetAttendanceThreshold'>取消编辑</button>
+              <span class='form-status' id='attendanceThresholdStatus'></span>
+            </div>
+            <div class='table' id='attendanceThresholdTable'></div>
+          </div>
+        </div>
+        <div class='card'>
+          <h3>当日不达标员工</h3>
+          <div class='form-grid'>
+            <label>
+              <span>开始日期</span>
+              <input type='date' id='reviewStartDate' />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input type='date' id='reviewEndDate' />
+            </label>
+            <label>
+              <span>部门</span>
+              <select id='reviewDepartment'></select>
+            </label>
+            <label>
+              <span>员工</span>
+              <div class="search-select" id="reviewEmployeeSelect">
+                <input type="text" id="reviewEmployeeSearch" placeholder="搜索工号 / 姓名" autocomplete="off" />
+                <input type="hidden" id="reviewEmployee" />
+                <div class="search-select-panel" id="reviewEmployeePanel"></div>
+              </div>
+              <div class="field-hint" id="reviewEmployeeHint">可选，不填则查询全部</div>
+            </label>
+          </div>
+          <div class='form-actions'>
+            <button class='btn btn-secondary' id='loadReviewList'>查询</button>
+            <button class='btn btn-secondary' id='resetReviewList'>重置</button>
+          </div>
+          <div class='table' id='reviewTable'></div>
+          <div class='pager' id='reviewPager'></div>
+        </div>
+      </section>
       <section class='section' id='section-audit'>
         <div class='section-header'>
           <div>
@@ -281,7 +412,12 @@
             <div class='form-grid'>
               <label>
                 <span>员工</span>
-                <select id='adjustEmployee'></select>
+                <div class="search-select" id="adjustEmployeeSelect">
+  <input type="text" id="adjustEmployeeSearch" placeholder="搜索工号 / 姓名" autocomplete="off" />
+  <input type="hidden" id="adjustEmployee" />
+  <div class="search-select-panel" id="adjustEmployeePanel"></div>
+</div>
+<div class="field-hint" id="adjustEmployeeHint">请输入工号/姓名</div>
               </label>
               <label>
                 <span>开始时间</span>
@@ -349,7 +485,12 @@
             </label>
             <label>
               <span>员工筛选</span>
-              <select id='offlineEmployee'></select>
+              <div class="search-select" id="offlineEmployeeSelect">
+  <input type="text" id="offlineEmployeeSearch" placeholder="搜索工号 / 姓名" autocomplete="off" />
+  <input type="hidden" id="offlineEmployee" />
+  <div class="search-select-panel" id="offlineEmployeePanel"></div>
+</div>
+<div class="field-hint" id="offlineEmployeeHint">可选，不填则查询全部</div>
             </label>
           </div>
           <div class='form-actions'>
@@ -428,11 +569,162 @@
           </div>
         </div>
       </section>
+      <section class='section' id='section-checkout'>
+        <div class='section-header'>
+          <div>
+            <h2>下班录入模板</h2>
+            <p class='muted'>按部门配置下班录入项，启用后下班必须填写</p>
+          </div>
+        </div>
+        <div class='grid-2'>
+          <div class='card'>
+            <h3>模板配置</h3>
+            <div class='form-grid'>
+              <label class='full'>
+                <span>部门</span>
+                <select id='checkoutDepartment'></select>
+              </label>
+              <label class='full'>
+                <span>模板名称</span>
+                <input type='text' id='checkoutTemplateName' placeholder='例如 客服下班记录' />
+              </label>
+              <label class='inline'>
+                <input type='checkbox' id='checkoutTemplateEnabled' />
+                <span>启用模板（同部门仅允许一个启用）</span>
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='saveCheckoutTemplate'>保存模板</button>
+              <button class='btn btn-secondary' id='cancelCheckoutTemplate'>取消编辑</button>
+              <span class='form-status' id='checkoutTemplateStatus'></span>
+            </div>
+            <div class='table' id='checkoutTemplatesTable'></div>
+          </div>
+          <div class='card'>
+            <h3>字段配置</h3>
+            <div class='form-grid'>
+              <label class='full'>
+                <span>字段名称</span>
+                <input type='text' id='checkoutFieldName' placeholder='例如 客服账号' />
+              </label>
+              <label>
+                <span>字段类型</span>
+                <select id='checkoutFieldType'>
+                  <option value='text'>文本</option>
+                  <option value='number'>数字</option>
+                  <option value='select'>下拉单选</option>
+                </select>
+              </label>
+              <label>
+                <span>排序</span>
+                <input type='number' id='checkoutFieldSort' value='0' />
+              </label>
+              <label class='full'>
+                <span>下拉选项（仅下拉，换行分隔）</span>
+                <textarea id='checkoutFieldOptions' placeholder='选项1
+选项2'></textarea>
+              </label>
+              <label class='inline'>
+                <input type='checkbox' id='checkoutFieldRequired' />
+                <span>必填</span>
+              </label>
+              <label class='inline'>
+                <input type='checkbox' id='checkoutFieldEnabled' checked />
+                <span>启用字段</span>
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='saveCheckoutField'>保存字段</button>
+              <button class='btn btn-secondary' id='cancelCheckoutField'>取消编辑</button>
+              <span class='form-status' id='checkoutFieldStatus'></span>
+            </div>
+            <div class='table' id='checkoutFieldsTable'></div>
+          </div>
+        </div>
+      
+        <div class='card'>
+          <h3>下班录入查询</h3>
+          <div class='form-grid'>
+            <label>
+              <span>开始日期</span>
+              <input type='date' id='checkoutQueryStart' />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input type='date' id='checkoutQueryEnd' />
+            </label>
+            <label>
+              <span>部门</span>
+              <select id='checkoutQueryDepartment'></select>
+            </label>
+            <label>
+              <span>员工</span>
+              <div class="search-select" id="checkoutEmployeeSelect">
+  <input type="text" id="checkoutEmployeeSearch" placeholder="搜索工号 / 姓名" autocomplete="off" />
+  <input type="hidden" id="checkoutEmployee" />
+  <div class="search-select-panel" id="checkoutEmployeePanel"></div>
+</div>
+<div class="field-hint" id="checkoutEmployeeHint">正在加载员工...</div>
+            </label>
+            <label>
+              <span>模板</span>
+              <select id='checkoutQueryTemplate'></select>
+            </label>
+          </div>
+          <div class='form-actions checkout-actions'>
+            <div class='quick-range' id='checkoutQuickRange'>
+              <button class='btn btn-secondary' data-range='today'>今天</button>
+              <button class='btn btn-secondary' data-range='yesterday'>昨天</button>
+              <button class='btn btn-secondary' data-range='week'>本周</button>
+              <button class='btn btn-secondary' data-range='month'>本月</button>
+            </div>
+            <div class='checkout-actions-right'>
+              <button class='btn btn-secondary' id='checkoutQuery'>查询</button>
+              <button class='btn btn-secondary' id='checkoutReset'>重置</button>
+            </div>
+          </div>
+          <div class='table' id='checkoutRecordsTable'></div>
+          <div class='pager' id='checkoutRecordsPager'></div>
+        </div>
+</section>
     </main>
+  </div>
+
+
+  <div class='detail-modal' id='reviewDetailModal'>
+    <div class='detail-card'>
+      <div class='detail-header'>
+        <div>
+          <h3>不达标详情</h3>
+          <p class='muted'>展示触发项与补录说明</p>
+        </div>
+        <button class='btn btn-secondary' id='closeReviewDetail'>关闭</button>
+      </div>
+      <div class='detail-body'>
+        <div class='detail-meta' id='reviewDetailMeta'></div>
+        <div class='detail-fields' id='reviewDetailFields'></div>
+      </div>
+    </div>
+  </div>
+  <div class='detail-modal' id='checkoutDetailModal'>
+    <div class='detail-card'>
+      <div class='detail-header'>
+        <div>
+          <h3>下班录入详情</h3>
+          <p class='muted'>仅展示可读中文内容</p>
+        </div>
+        <button class='btn btn-secondary' id='closeCheckoutDetail'>关闭</button>
+      </div>
+      <div class='detail-body'>
+        <div class='detail-meta' id='checkoutDetailMeta'></div>
+        <div class='detail-fields' id='checkoutDetailFields'></div>
+      </div>
+    </div>
   </div>
 
   <script src='/assets/app.js'></script>
 </body>
 </html>
+
 
 

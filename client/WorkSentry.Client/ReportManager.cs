@@ -1,9 +1,36 @@
 using System;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace WorkSentry.Client;
+
+internal sealed class ReportResult
+{
+    public bool Success { get; }
+    public string? Error { get; }
+    public string? ErrorCode { get; }
+    public JsonElement? ErrorData { get; }
+
+    private ReportResult(bool success, string? error, string? errorCode, JsonElement? errorData)
+    {
+        Success = success;
+        Error = error;
+        ErrorCode = errorCode;
+        ErrorData = errorData;
+    }
+
+    public static ReportResult Ok()
+    {
+        return new ReportResult(true, null, null, null);
+    }
+
+    public static ReportResult Fail(string? error, string? code = null, JsonElement? data = null)
+    {
+        return new ReportResult(false, error, code, data);
+    }
+}
 
 internal sealed class ReportManager
 {
@@ -19,6 +46,7 @@ internal sealed class ReportManager
     private string? _token;
     private string _optionalUpdateNotified = "";
     private bool _forceReport;
+    private bool _isBreaking;
 
     public event Action<string?, string?>? ForcedUpdate;
     public event Action<string?, string?>? OptionalUpdate;
@@ -55,6 +83,12 @@ internal sealed class ReportManager
 
     public void RequestImmediateReport()
     {
+        _forceReport = true;
+    }
+
+    public void SetBreakState(bool isBreaking)
+    {
+        _isBreaking = isBreaking;
         _forceReport = true;
     }
 
@@ -104,19 +138,44 @@ internal sealed class ReportManager
     public async Task<bool> SendWorkStartAsync(CancellationToken ct)
     {
         var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
-        return await TrySendReportAsync(sample, "work_start", ct, false).ConfigureAwait(false);
+        return await TrySendReportAsync(sample, "work_start", ct, false, null).ConfigureAwait(false);
     }
 
-    public async Task<bool> SendWorkEndAsync(CancellationToken ct)
+    public async Task<ReportResult> SendWorkEndAsync(ClientCheckoutPayload? checkout, string? reason, CancellationToken ct)
     {
         var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
-        return await TrySendReportAsync(sample, "work_end", ct, false).ConfigureAwait(false);
+        return await TrySendReportWithErrorAsync(sample, "work_end", ct, false, checkout, reason).ConfigureAwait(false);
     }
+
+    public async Task<CheckoutTemplateResponse?> GetCheckoutTemplateAsync(CancellationToken ct)
+    {
+        await EnsureBoundAsync(ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(_token))
+        {
+            throw new UnauthorizedException("缺少令牌");
+        }
+        return await _apiClient.GetCheckoutTemplateAsync(_token!, ct).ConfigureAwait(false);
+    }
+
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
+            if (_isBreaking)
+            {
+                var breakSample = CreateBreakSample();
+                var shouldHeartbeatOnBreak = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
+                if (_forceReport || shouldHeartbeatOnBreak)
+                {
+                    _forceReport = false;
+                    await SafeSendAsync(breakSample, "break", ct).ConfigureAwait(false);
+                    _lastHeartbeatAt = DateTime.UtcNow;
+                }
+                _lastSample = breakSample;
+                continue;
+            }
+
             var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
             var shouldChange = _forceReport || IsChange(sample, _lastSample);
             var shouldHeartbeat = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
@@ -136,7 +195,10 @@ internal sealed class ReportManager
             _lastSample = sample;
         }
     }
-
+    private static SampleState CreateBreakSample()
+    {
+        return new SampleState(string.Empty, string.Empty, 0, false);
+    }
     private static bool IsChange(SampleState current, SampleState? previous)
     {
         if (previous == null)
@@ -187,10 +249,10 @@ internal sealed class ReportManager
 
     private async Task SafeSendAsync(SampleState sample, string reportType, CancellationToken ct)
     {
-        _ = await TrySendReportAsync(sample, reportType, ct, true).ConfigureAwait(false);
+        _ = await TrySendReportAsync(sample, reportType, ct, true, null).ConfigureAwait(false);
     }
 
-    private async Task<bool> TrySendReportAsync(SampleState sample, string reportType, CancellationToken ct, bool notifyStatus)
+    private async Task<bool> TrySendReportAsync(SampleState sample, string reportType, CancellationToken ct, bool notifyStatus, ClientCheckoutPayload? checkout)
     {
         if (!_backoff.CanSend)
         {
@@ -200,7 +262,7 @@ internal sealed class ReportManager
         try
         {
             await EnsureBoundAsync(ct).ConfigureAwait(false);
-            var response = await SendReportAsync(sample, reportType, ct).ConfigureAwait(false);
+            var response = await SendReportAsync(sample, reportType, ct, checkout).ConfigureAwait(false);
             _backoff.RegisterSuccess();
             ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
             if (notifyStatus)
@@ -233,11 +295,19 @@ internal sealed class ReportManager
             _backoff.RegisterFailure();
             StatusChanged?.Invoke("网络异常");
         }
+        catch (NeedReasonException ex)
+        {
+            _logger.Warn(ex.Message);
+            return false;
+        }
         catch (ApiException ex)
         {
             _logger.Warn(ex.Message);
             _backoff.RegisterFailure();
-            StatusChanged?.Invoke("网络异常");
+            if (ex.StatusCode != System.Net.HttpStatusCode.BadRequest)
+            {
+                StatusChanged?.Invoke("网络异常");
+            }
         }
         catch (Exception ex)
         {
@@ -247,7 +317,77 @@ internal sealed class ReportManager
         return false;
     }
 
-    private async Task<ClientReportResponse> SendReportAsync(SampleState sample, string reportType, CancellationToken ct)
+    private async Task<ReportResult> TrySendReportWithErrorAsync(SampleState sample, string reportType, CancellationToken ct, bool notifyStatus, ClientCheckoutPayload? checkout, string? reason)
+    {
+        if (!_backoff.CanSend)
+        {
+            return ReportResult.Fail(string.Empty);
+        }
+
+        try
+        {
+            await EnsureBoundAsync(ct).ConfigureAwait(false);
+            var response = await SendReportAsync(sample, reportType, ct, checkout, reason).ConfigureAwait(false);
+            _backoff.RegisterSuccess();
+            ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
+            if (notifyStatus)
+            {
+                StatusChanged?.Invoke("已上报");
+            }
+            return ReportResult.Ok();
+        }
+        catch (UpgradeRequiredException ex)
+        {
+            _logger.Warn(ex.Message);
+            TriggerForcedUpdate();
+            return ReportResult.Fail(ex.Message);
+        }
+        catch (UnauthorizedException ex)
+        {
+            _logger.Warn(ex.Message);
+            _tokenStore.ClearToken();
+            _token = null;
+            _backoff.RegisterFailure();
+            return ReportResult.Fail(ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.Warn(ex.Message);
+            _backoff.RegisterFailure();
+            StatusChanged?.Invoke("网络异常");
+            return ReportResult.Fail(string.Empty);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.Warn($"请求超时: {ex.Message}");
+            _backoff.RegisterFailure();
+            StatusChanged?.Invoke("网络异常");
+            return ReportResult.Fail(string.Empty);
+        }
+        catch (NeedReasonException ex)
+        {
+            _logger.Warn(ex.Message);
+            return ReportResult.Fail(ex.Message, "need_reason", ex.Data);
+        }
+        catch (ApiException ex)
+        {
+            _logger.Warn(ex.Message);
+            _backoff.RegisterFailure();
+            if (ex.StatusCode != System.Net.HttpStatusCode.BadRequest)
+            {
+                StatusChanged?.Invoke("网络异常");
+            }
+            return ReportResult.Fail(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex.Message);
+            _backoff.RegisterFailure();
+            return ReportResult.Fail(string.Empty);
+        }
+    }
+
+    private async Task<ClientReportResponse> SendReportAsync(SampleState sample, string reportType, CancellationToken ct, ClientCheckoutPayload? checkout, string? reason = null)
     {
         if (string.IsNullOrWhiteSpace(_token))
         {
@@ -260,7 +400,9 @@ internal sealed class ReportManager
             WindowTitle = sample.WindowTitle,
             IdleSeconds = sample.IdleSeconds,
             ClientVersion = AppConstants.ClientVersion,
-            ReportType = reportType
+            ReportType = reportType,
+            Checkout = checkout,
+            Reason = reason ?? string.Empty
         }, _token!, ct).ConfigureAwait(false);
     }
 
@@ -296,5 +438,4 @@ internal sealed class ReportManager
         Stop();
     }
 }
-
 

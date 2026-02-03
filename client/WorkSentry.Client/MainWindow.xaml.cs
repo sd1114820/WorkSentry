@@ -24,12 +24,18 @@ internal sealed partial class MainWindow : Window
     private static readonly MediaBrush OffCardBackground = new MediaSolidColorBrush(MediaColor.FromRgb(249, 250, 251));
     private static readonly MediaBrush OffCardBorder = new MediaSolidColorBrush(MediaColor.FromRgb(229, 231, 235));
     private static readonly MediaBrush OffIcon = new MediaSolidColorBrush(MediaColor.FromRgb(226, 232, 240));
+    private static readonly MediaBrush BreakForeground = new MediaSolidColorBrush(MediaColor.FromRgb(217, 119, 6));
+    private static readonly MediaBrush BreakCardBackground = new MediaSolidColorBrush(MediaColor.FromRgb(255, 251, 235));
+    private static readonly MediaBrush BreakCardBorder = new MediaSolidColorBrush(MediaColor.FromRgb(253, 230, 138));
+    private static readonly MediaBrush BreakIcon = new MediaSolidColorBrush(MediaColor.FromRgb(252, 211, 77));
     private static readonly MediaBrush PolicyHintBackground = new MediaSolidColorBrush(MediaColor.FromRgb(243, 244, 246));
     private static readonly MediaBrush PolicyHintForeground = new MediaSolidColorBrush(MediaColor.FromRgb(55, 65, 81));
     private static readonly MediaBrush PolicyForceBackground = new MediaSolidColorBrush(MediaColor.FromRgb(254, 226, 226));
     private static readonly MediaBrush PolicyForceForeground = new MediaSolidColorBrush(MediaColor.FromRgb(185, 28, 28));
 
     private string _currentStatusToken = "待上班";
+    private bool _isWorking;
+    private bool _isBreaking;
     private DateTime? _lastReportTime;
     private int _lastUpdatePolicy;
     private string _lastLatestVersion = string.Empty;
@@ -46,6 +52,7 @@ internal sealed partial class MainWindow : Window
     public event Action<string>? SaveConfigRequested;
     public event Action? StartRequested;
     public event Action? StopRequested;
+    public event Action? BreakToggleRequested;
     public event Action? ExitRequested;
     public event Action? UpdateNowRequested;
     public event Action? UpdateLaterRequested;
@@ -59,6 +66,7 @@ internal sealed partial class MainWindow : Window
         SaveButton.Click += (_, _) => SaveConfig();
         StartButton.Click += (_, _) => StartRequested?.Invoke();
         StopButton.Click += (_, _) => StopRequested?.Invoke();
+        BreakButton.Click += (_, _) => BreakToggleRequested?.Invoke();
         ExitButton.Click += (_, _) => ExitRequested?.Invoke();
         UpdateNowButton.Click += (_, _) => UpdateNowRequested?.Invoke();
         UpdateLaterButton.Click += (_, _) => UpdateLaterRequested?.Invoke();
@@ -92,6 +100,7 @@ internal sealed partial class MainWindow : Window
         EmployeeCodeBox.Text = config.EmployeeCode;
         SetLanguageSelection(config.LanguageOverride);
         UpdateUpdateInfo(config.UpdatePolicy, config.LatestVersion);
+        UpdateBreakButton();
     }
 
     private void SetLanguageSelection(string? overrideValue)
@@ -142,12 +151,18 @@ internal sealed partial class MainWindow : Window
 
     internal void SetWorkingState(bool working)
     {
+        _isWorking = working;
+        if (!working)
+        {
+            _isBreaking = false;
+        }
         StartButton.IsEnabled = !working;
         StartButton.Visibility = working ? Visibility.Collapsed : Visibility.Visible;
         StopButton.IsEnabled = working;
         StopButton.Visibility = working ? Visibility.Visible : Visibility.Collapsed;
         SaveButton.IsEnabled = !working;
         EmployeeCodeBox.IsEnabled = !working;
+        UpdateBreakButton();
         UpdateStatus(working ? "已上班" : "待上班");
         if (!working)
         {
@@ -156,6 +171,19 @@ internal sealed partial class MainWindow : Window
         }
     }
 
+
+    internal void SetBreakState(bool isBreaking)
+    {
+        _isBreaking = isBreaking;
+        UpdateBreakButton();
+    }
+
+    private void UpdateBreakButton()
+    {
+        BreakButton.Content = LanguageService.GetString(_isBreaking ? "BreakStopButton" : "BreakStartButton");
+        BreakButton.IsEnabled = _isWorking;
+        BreakButton.Visibility = _isWorking ? Visibility.Visible : Visibility.Collapsed;
+    }
     internal void UpdateStatus(string status)
     {
         _currentStatusToken = status;
@@ -163,6 +191,7 @@ internal sealed partial class MainWindow : Window
         var (fg, cardBg, cardBorder, icon) = status switch
         {
             "已上班" => (WorkingForeground, WorkingCardBackground, WorkingCardBorder, WorkingIcon),
+            "休息中" => (BreakForeground, BreakCardBackground, BreakCardBorder, BreakIcon),
             "网络异常" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
             "已下班" => (OffForeground, OffCardBackground, OffCardBorder, OffIcon),
             "连接中" => (IdleForeground, IdleCardBackground, IdleCardBorder, IdleIcon),

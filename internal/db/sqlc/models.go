@@ -19,6 +19,7 @@ const (
 	EmployeesLastStatusNormal EmployeesLastStatus = "normal"
 	EmployeesLastStatusFish   EmployeesLastStatus = "fish"
 	EmployeesLastStatusIdle   EmployeesLastStatus = "idle"
+	EmployeesLastStatusBreak  EmployeesLastStatus = "break"
 )
 
 func (e *EmployeesLastStatus) Scan(src interface{}) error {
@@ -105,6 +106,7 @@ const (
 	RawEventsStatusNormal RawEventsStatus = "normal"
 	RawEventsStatusFish   RawEventsStatus = "fish"
 	RawEventsStatusIdle   RawEventsStatus = "idle"
+	RawEventsStatusBreak  RawEventsStatus = "break"
 )
 
 func (e *RawEventsStatus) Scan(src interface{}) error {
@@ -279,6 +281,7 @@ const (
 	TimeSegmentsStatusIdle     TimeSegmentsStatus = "idle"
 	TimeSegmentsStatusOffline  TimeSegmentsStatus = "offline"
 	TimeSegmentsStatusIncident TimeSegmentsStatus = "incident"
+	TimeSegmentsStatusBreak    TimeSegmentsStatus = "break"
 )
 
 func (e *TimeSegmentsStatus) Scan(src interface{}) error {

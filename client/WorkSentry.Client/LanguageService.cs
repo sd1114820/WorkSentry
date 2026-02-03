@@ -108,6 +108,7 @@ internal static class LanguageService
         return statusToken switch
         {
             "已上班" => GetString("StatusWorking"),
+            "休息中" => GetString("StatusBreak"),
             "待上班" => GetString("StatusIdle"),
             "已下班" => GetString("StatusOff"),
             "连接中" => GetString("StatusConnecting"),

@@ -81,5 +81,24 @@
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}: downloaded {1}</sys:String>
   <sys:String x:Key="MsgWorkStartFailed">Cannot reach server. Unable to clock in.</sys:String>
   <sys:String x:Key="MsgWorkEndFailed">Cannot reach server. Unable to clock out. Please try again.</sys:String>
-  <sys:String x:Key="MsgExitNeedStop">You are working. Please clock out before exiting.</sys:String></ResourceDictionary>
+  <sys:String x:Key="MsgExitNeedStop">You are working. Please clock out before exiting.</sys:String>
+  <sys:String x:Key="CheckoutTitle">Checkout</sys:String>
+  <sys:String x:Key="CheckoutSubtitle">Please fill in the following before clocking out</sys:String>
+  <sys:String x:Key="CheckoutTemplateLabel">Template</sys:String>
+  <sys:String x:Key="CheckoutConfirmButton">Confirm clock out</sys:String>
+  <sys:String x:Key="CheckoutCancelButton">Cancel</sys:String>
+  <sys:String x:Key="CheckoutNoFields">No fields are required. You can clock out now.</sys:String>
+  <sys:String x:Key="CheckoutErrorRequired">Please fill in {0}</sys:String>
+  <sys:String x:Key="CheckoutErrorNumber">{0} must be a number</sys:String>
+  <sys:String x:Key="CheckoutErrorSelect">Invalid option for {0}</sys:String>
+  <sys:String x:Key="CheckoutErrorLength">{0} cannot exceed {1} characters</sys:String>
+  <sys:String x:Key="MsgCheckoutTemplateFailed">Failed to load checkout template. Please try again.</sys:String>
+  <sys:String x:Key="WorkEndReasonTitle">Work End Reason</sys:String>
+  <sys:String x:Key="WorkEndReasonSubtitle">Unmet targets or exceptions detected. Please provide a reason to end work.</sys:String>
+  <sys:String x:Key="WorkEndReasonViolations">Issues</sys:String>
+  <sys:String x:Key="WorkEndReasonInputLabel">Reason</sys:String>
+  <sys:String x:Key="WorkEndReasonPlaceholder">Please enter the reason</sys:String>
+  <sys:String x:Key="WorkEndReasonConfirm">Confirm</sys:String>
+  <sys:String x:Key="WorkEndReasonCancel">Back</sys:String>
+  <sys:String x:Key="WorkEndReasonError">Please enter a reason</sys:String></ResourceDictionary>
 

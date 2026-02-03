@@ -81,5 +81,24 @@
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}：已下载 {1}</sys:String>
   <sys:String x:Key="MsgWorkStartFailed">无法连接服务端，无法开始上班。</sys:String>
   <sys:String x:Key="MsgWorkEndFailed">无法连接服务端，无法下班，请稍后重试。</sys:String>
-  <sys:String x:Key="MsgExitNeedStop">当前已上班，退出前请先下班。</sys:String></ResourceDictionary>
+  <sys:String x:Key="MsgExitNeedStop">当前已上班，退出前请先下班。</sys:String>
+  <sys:String x:Key="CheckoutTitle">下班录入</sys:String>
+  <sys:String x:Key="CheckoutSubtitle">请填写以下信息后下班</sys:String>
+  <sys:String x:Key="CheckoutTemplateLabel">模板</sys:String>
+  <sys:String x:Key="CheckoutConfirmButton">确认下班</sys:String>
+  <sys:String x:Key="CheckoutCancelButton">取消</sys:String>
+  <sys:String x:Key="CheckoutNoFields">无需填写任何内容，可直接下班。</sys:String>
+  <sys:String x:Key="CheckoutErrorRequired">请填写{0}</sys:String>
+  <sys:String x:Key="CheckoutErrorNumber">{0}需填写数字</sys:String>
+  <sys:String x:Key="CheckoutErrorSelect">{0}选项无效</sys:String>
+  <sys:String x:Key="CheckoutErrorLength">{0}长度不能超过{1}</sys:String>
+  <sys:String x:Key="MsgCheckoutTemplateFailed">读取下班模板失败，请稍后重试。</sys:String>
+  <sys:String x:Key="WorkEndReasonTitle">下班说明</sys:String>
+  <sys:String x:Key="WorkEndReasonSubtitle">存在未达标或异常情况，请填写说明后下班</sys:String>
+  <sys:String x:Key="WorkEndReasonViolations">未达标项</sys:String>
+  <sys:String x:Key="WorkEndReasonInputLabel">说明</sys:String>
+  <sys:String x:Key="WorkEndReasonPlaceholder">请填写原因或情况说明</sys:String>
+  <sys:String x:Key="WorkEndReasonConfirm">确认下班</sys:String>
+  <sys:String x:Key="WorkEndReasonCancel">返回</sys:String>
+  <sys:String x:Key="WorkEndReasonError">请填写说明</sys:String></ResourceDictionary>
 

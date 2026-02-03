@@ -446,6 +446,7 @@ button, input, select, textarea {
 .dot.normal { background: var(--color-info); }
 .dot.fish { background: var(--color-danger); }
 .dot.idle { background: var(--color-warning); }
+.dot.break { background: #a78bfa; }
 .dot.offline { background: #9ca3af; }
 
 .live-group-list {
@@ -492,6 +493,7 @@ button, input, select, textarea {
 .status.idle { color: var(--color-warning); }
 .status.offline { color: #9ca3af; }
 .status.normal { color: var(--color-info); }
+.status.break { color: #7c3aed; }
 
 .empty-hint {
   padding: var(--space-lg);
@@ -530,7 +532,8 @@ button, input, select, textarea {
 .table-row.cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .table-row.cols-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .table-row.cols-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
-.table-row.cols-9 { grid-template-columns: repeat(9, minmax(0, 1fr)); }\n.table-row.cols-10 { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+.table-row.cols-9 { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+.table-row.cols-10 { grid-template-columns: repeat(10, minmax(0, 1fr)); }
 
 .table-section-title {
   font-size: 14px;
@@ -601,6 +604,126 @@ button, input, select, textarea {
   color: var(--color-muted);
 }
 
+
+.checkout-actions {
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.quick-range {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.checkout-actions-right {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--color-muted);
+  font-size: 13px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pager-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.detail-modal.is-active {
+  display: flex;
+}
+
+.detail-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  width: min(900px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: 24px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.4);
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-meta-item {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.detail-meta-item span {
+  display: block;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.detail-meta-item strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.detail-field {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.detail-field-name {
+  font-size: 13px;
+  color: var(--color-muted);
+  margin-bottom: 6px;
+}
+
+.detail-field-value {
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
 .status.offwork {
   color: #94a3b8;
 }
+

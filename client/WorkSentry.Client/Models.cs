@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 
 namespace WorkSentry.Client;
 
@@ -37,6 +39,12 @@ internal sealed class ClientBindResponse
     public string ServerTime { get; set; } = "";
 }
 
+internal sealed class ClientCheckoutPayload
+{
+    public long TemplateId { get; set; }
+    public Dictionary<string, string> Data { get; set; } = new();
+}
+
 internal sealed class ClientReportRequest
 {
     public string ProcessName { get; set; } = "";
@@ -44,6 +52,8 @@ internal sealed class ClientReportRequest
     public int IdleSeconds { get; set; }
     public string ClientVersion { get; set; } = "";
     public string ReportType { get; set; } = "";
+    public ClientCheckoutPayload? Checkout { get; set; }
+    public string Reason { get; set; } = "";
 }
 
 internal sealed class ClientReportResponse
@@ -57,9 +67,37 @@ internal sealed class ClientReportResponse
     public string ServerTime { get; set; } = "";
 }
 
+internal sealed class CheckoutTemplateResponse
+{
+    public bool Exists { get; set; }
+    public CheckoutTemplate? Template { get; set; }
+}
+
+internal sealed class CheckoutTemplate
+{
+    public long TemplateId { get; set; }
+    public string Name { get; set; } = "";
+    public List<CheckoutField> Fields { get; set; } = new();
+}
+
+internal sealed class CheckoutField
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = "";
+    public string Type { get; set; } = "";
+    public bool Required { get; set; }
+    public List<string> Options { get; set; } = new();
+}
+
 internal sealed class ApiErrorResponse
 {
     public string Message { get; set; } = "";
+    public string Code { get; set; } = "";
+    public JsonElement? Data { get; set; }
 }
 
 internal sealed record SampleState(string ProcessName, string WindowTitle, int IdleSeconds, bool IsIdle);
+
+
+
+
