@@ -285,33 +285,48 @@
                 <span>部门</span>
                 <select id='attendanceDepartment'></select>
               </label>
-              <label>
-                <span>目标工时（小时）</span>
-                <input type='number' id='attendanceTargetHours' min='0' />
+              <label class='full'>
+                <span>目标工时</span>
+                <div class='time-input'>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceTargetHours' min='0' inputmode='numeric' />
+                    <span class='unit-badge'>小时</span>
+                  </div>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceTargetMinutes' min='0' max='59' inputmode='numeric' />
+                    <span class='unit-badge'>分钟</span>
+                  </div>
+                </div>
               </label>
-              <label>
-                <span>目标工时（分钟）</span>
-                <input type='number' id='attendanceTargetMinutes' min='0' max='59' />
-              </label>
-              <label>
-                <span>休息总时长（小时）</span>
-                <input type='number' id='attendanceBreakHours' min='0' />
-              </label>
-              <label>
-                <span>休息总时长（分钟）</span>
-                <input type='number' id='attendanceBreakMinutes' min='0' max='59' />
+              <label class='full'>
+                <span>休息总时长</span>
+                <div class='time-input'>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceBreakHours' min='0' inputmode='numeric' />
+                    <span class='unit-badge'>小时</span>
+                  </div>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceBreakMinutes' min='0' max='59' inputmode='numeric' />
+                    <span class='unit-badge'>分钟</span>
+                  </div>
+                </div>
               </label>
               <label>
                 <span>休息次数上限</span>
                 <input type='number' id='attendanceBreakCount' min='0' />
               </label>
-              <label>
-                <span>单次休息上限（小时）</span>
-                <input type='number' id='attendanceBreakSingleHours' min='0' />
-              </label>
-              <label>
-                <span>单次休息上限（分钟）</span>
-                <input type='number' id='attendanceBreakSingleMinutes' min='0' max='59' />
+              <label class='full'>
+                <span>单次休息上限</span>
+                <div class='time-input'>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceBreakSingleHours' min='0' inputmode='numeric' />
+                    <span class='unit-badge'>小时</span>
+                  </div>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceBreakSingleMinutes' min='0' max='59' inputmode='numeric' />
+                    <span class='unit-badge'>分钟</span>
+                  </div>
+                </div>
               </label>
               <label class='inline full'>
                 <input type='checkbox' id='attendanceEnabled' checked />
@@ -330,21 +345,31 @@
                 <span>状态</span>
                 <select id='attendanceStatusCode'></select>
               </label>
-              <label>
-                <span>最小阈值（小时）</span>
-                <input type='number' id='attendanceMinHours' min='0' />
+              <label class='full'>
+                <span>最小阈值</span>
+                <div class='time-input'>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceMinHours' min='0' inputmode='numeric' />
+                    <span class='unit-badge'>小时</span>
+                  </div>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceMinMinutes' min='0' max='59' inputmode='numeric' />
+                    <span class='unit-badge'>分钟</span>
+                  </div>
+                </div>
               </label>
-              <label>
-                <span>最小阈值（分钟）</span>
-                <input type='number' id='attendanceMinMinutes' min='0' max='59' />
-              </label>
-              <label>
-                <span>最大阈值（小时）</span>
-                <input type='number' id='attendanceMaxHours' min='0' />
-              </label>
-              <label>
-                <span>最大阈值（分钟）</span>
-                <input type='number' id='attendanceMaxMinutes' min='0' max='59' />
+              <label class='full'>
+                <span>最大阈值</span>
+                <div class='time-input'>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceMaxHours' min='0' inputmode='numeric' />
+                    <span class='unit-badge'>小时</span>
+                  </div>
+                  <div class='time-field'>
+                    <input type='number' id='attendanceMaxMinutes' min='0' max='59' inputmode='numeric' />
+                    <span class='unit-badge'>分钟</span>
+                  </div>
+                </div>
               </label>
               <label>
                 <span>触发处理</span>
