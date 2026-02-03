@@ -100,7 +100,8 @@
   <sys:String x:Key="WorkEndReasonPlaceholder">Please enter the reason</sys:String>
   <sys:String x:Key="WorkEndReasonConfirm">Confirm</sys:String>
   <sys:String x:Key="WorkEndReasonCancel">Back</sys:String>
-  <sys:String x:Key="WorkEndReasonError">Please enter a reason</sys:String>  <sys:String x:Key="BreakStartButton">Start Break</sys:String>
+  <sys:String x:Key="WorkEndReasonError">Please enter a reason</sys:String>
+  <sys:String x:Key="BreakStartButton">Start Break</sys:String>
   <sys:String x:Key="BreakStopButton">End Break</sys:String>
   <sys:String x:Key="TrayBreakStart">Start Break</sys:String>
   <sys:String x:Key="TrayBreakStop">End Break</sys:String>

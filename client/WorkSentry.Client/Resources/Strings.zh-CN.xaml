@@ -100,7 +100,8 @@
   <sys:String x:Key="WorkEndReasonPlaceholder">请填写原因或情况说明</sys:String>
   <sys:String x:Key="WorkEndReasonConfirm">确认下班</sys:String>
   <sys:String x:Key="WorkEndReasonCancel">返回</sys:String>
-  <sys:String x:Key="WorkEndReasonError">请填写说明</sys:String>  <sys:String x:Key="BreakStartButton">开始休息</sys:String>
+  <sys:String x:Key="WorkEndReasonError">请填写说明</sys:String>
+  <sys:String x:Key="BreakStartButton">开始休息</sys:String>
   <sys:String x:Key="BreakStopButton">结束休息</sys:String>
   <sys:String x:Key="TrayBreakStart">开始休息</sys:String>
   <sys:String x:Key="TrayBreakStop">结束休息</sys:String>

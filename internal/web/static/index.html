@@ -345,28 +345,22 @@
                 <span>状态</span>
                 <select id='attendanceStatusCode'></select>
               </label>
-              <label class='full'>
-                <span>最小阈值</span>
-                <div class='time-input'>
-                  <div class='time-field'>
-                    <input type='number' id='attendanceMinHours' min='0' inputmode='numeric' />
-                    <span class='unit-badge'>小时</span>
-                  </div>
-                  <div class='time-field'>
-                    <input type='number' id='attendanceMinMinutes' min='0' max='59' inputmode='numeric' />
-                    <span class='unit-badge'>分钟</span>
-                  </div>
-                </div>
+              <label>
+                <span>阈值方向</span>
+                <select id='attendanceThresholdOperator'>
+                  <option value='less'>小于</option>
+                  <option value='greater'>大于</option>
+                </select>
               </label>
               <label class='full'>
-                <span>最大阈值</span>
+                <span>阈值时长</span>
                 <div class='time-input'>
                   <div class='time-field'>
-                    <input type='number' id='attendanceMaxHours' min='0' inputmode='numeric' />
+                    <input type='number' id='attendanceThresholdHours' min='0' inputmode='numeric' />
                     <span class='unit-badge'>小时</span>
                   </div>
                   <div class='time-field'>
-                    <input type='number' id='attendanceMaxMinutes' min='0' max='59' inputmode='numeric' />
+                    <input type='number' id='attendanceThresholdMinutes' min='0' max='59' inputmode='numeric' />
                     <span class='unit-badge'>分钟</span>
                   </div>
                 </div>

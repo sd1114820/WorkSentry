@@ -710,19 +710,137 @@ async function loadTimeline() {
   }
 }
 
+function parseClockDurationSeconds(value) {
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  const parts = text.split(':').map((item) => Number(item));
+  if (!parts.length || parts.some((item) => Number.isNaN(item))) {
+    return 0;
+  }
+  if (parts.length === 2) {
+    return parts[0] * 3600 + parts[1] * 60;
+  }
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
+function formatClockDuration(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+}
+
+function mergeTimelineForDisplay(items) {
+  const list = Array.isArray(items) ? items : [];
+  const groups = [];
+
+  for (const item of list) {
+    const durationSeconds = parseClockDurationSeconds(item.duration);
+    const last = groups[groups.length - 1];
+    if (last && last.statusCode === item.statusCode && last.endAt === item.startAt) {
+      last.endAt = item.endAt;
+      last.durationSeconds += durationSeconds;
+      last.children.push(item);
+      if (item.description) {
+        last.descriptionSet.add(item.description);
+      }
+      if (item.sourceLabel) {
+        last.sourceSet.add(item.sourceLabel);
+      }
+      continue;
+    }
+
+    const group = {
+      statusCode: item.statusCode,
+      statusLabel: item.statusLabel,
+      startAt: item.startAt,
+      endAt: item.endAt,
+      durationSeconds: durationSeconds,
+      children: [item],
+      descriptionSet: new Set(),
+      sourceSet: new Set(),
+    };
+    if (item.description) {
+      group.descriptionSet.add(item.description);
+    }
+    if (item.sourceLabel) {
+      group.sourceSet.add(item.sourceLabel);
+    }
+    groups.push(group);
+  }
+
+  return groups.map((group) => {
+    const descriptions = Array.from(group.descriptionSet).filter((item) => String(item || '').trim());
+    const sources = Array.from(group.sourceSet).filter((item) => String(item || '').trim());
+
+    const descriptionText = descriptions.length === 0
+      ? '-'
+      : (descriptions.length === 1 ? descriptions[0] : '多条记录（展开查看）');
+
+    const sourceText = sources.length === 0
+      ? '-'
+      : (sources.length === 1 ? sources[0] : '混合');
+
+    return {
+      statusCode: group.statusCode,
+      statusLabel: group.statusLabel,
+      startAt: group.startAt,
+      endAt: group.endAt,
+      duration: formatClockDuration(group.durationSeconds),
+      description: descriptionText,
+      sourceLabel: sourceText,
+      children: group.children,
+    };
+  });
+}
+
 function renderTimeline(items) {
   const container = document.getElementById('timelineTable');
   const headers = ['状态', '开始', '结束', '时长', '描述', '来源'];
-  const rows = items.map((item) => [
-    '<div class="table-row cols-6">',
-    '<div>' + item.statusLabel + '</div>',
-    '<div>' + item.startAt + '</div>',
-    '<div>' + item.endAt + '</div>',
-    '<div>' + item.duration + '</div>',
-    '<div>' + (item.description || '-') + '</div>',
-    '<div>' + item.sourceLabel + '</div>',
-    '</div>'
-  ].join(''));
+  const groups = mergeTimelineForDisplay(items);
+
+  const rows = [];
+  groups.forEach((group, index) => {
+    const canExpand = group.children && group.children.length > 1;
+    const toggle = canExpand
+      ? '<button class="btn btn-secondary timeline-toggle" data-group="' + index + '">展开</button>'
+      : '';
+    const tag = canExpand
+      ? '<span class="tag">' + group.children.length + ' 段</span>'
+      : '';
+
+    rows.push([
+      '<div class="table-row cols-6 timeline-group">',
+      '<div>' + toggle + '<span>' + group.statusLabel + '</span> ' + tag + '</div>',
+      '<div>' + group.startAt + '</div>',
+      '<div>' + group.endAt + '</div>',
+      '<div>' + group.duration + '</div>',
+      '<div>' + (group.description || '-') + '</div>',
+      '<div>' + (group.sourceLabel || '-') + '</div>',
+      '</div>'
+    ].join(''));
+
+    if (!canExpand) {
+      return;
+    }
+
+    group.children.forEach((item) => {
+      rows.push([
+        '<div class="table-row cols-6 timeline-child" data-parent="' + index + '" style="display:none;">',
+        '<div>' + item.statusLabel + '</div>',
+        '<div>' + item.startAt + '</div>',
+        '<div>' + item.endAt + '</div>',
+        '<div>' + item.duration + '</div>',
+        '<div>' + (item.description || '-') + '</div>',
+        '<div>' + item.sourceLabel + '</div>',
+        '</div>'
+      ].join(''));
+    });
+  });
+
   renderTable(container, headers, rows, 'cols-6');
 }
 
@@ -1553,6 +1671,26 @@ async function saveAttendanceRule() {
   }
 }
 
+function getThresholdOperatorLabel(item) {
+  if (item.minSeconds && item.maxSeconds) {
+    return '区间';
+  }
+  if (item.minSeconds) {
+    return '小于';
+  }
+  if (item.maxSeconds) {
+    return '大于';
+  }
+  return '-';
+}
+
+function getThresholdLimitText(item) {
+  if (item.minSeconds && item.maxSeconds) {
+    return formatDurationText(item.minSeconds) + ' ~ ' + formatDurationText(item.maxSeconds);
+  }
+  const seconds = item.minSeconds || item.maxSeconds || 0;
+  return seconds ? formatDurationText(seconds) : '-';
+}
 function renderAttendanceThresholdTable() {
   const container = document.getElementById('attendanceThresholdTable');
   if (!container) return;
@@ -1560,28 +1698,32 @@ function renderAttendanceThresholdTable() {
     container.innerHTML = '<div class="empty-hint">暂无阈值配置</div>';
     return;
   }
-  const headers = ['状态', '最小阈值', '最大阈值', '触发处理', '启用', '操作'];
-  const rows = attendanceThresholds.map((item, index) => [
-    '<div class="table-row cols-6">',
-    '<div>' + getStatusLabel(item.statusCode) + '</div>',
-    '<div>' + (item.minSeconds ? formatDurationText(item.minSeconds) : '-') + '</div>',
-    '<div>' + (item.maxSeconds ? formatDurationText(item.maxSeconds) : '-') + '</div>',
-    '<div>' + getTriggerActionLabel(item.triggerAction) + '</div>',
-    '<div>' + (item.enabled ? '是' : '否') + '</div>',
-    '<div>',
-    '<button class="btn btn-secondary" data-action="edit" data-index="' + index + '">编辑</button>',
-    '<button class="btn btn-secondary" data-action="delete" data-index="' + index + '">删除</button>',
-    '</div>',
-    '</div>'
-  ].join(''));
+  const headers = ['状态', '阈值方向', '阈值时长', '触发处理', '启用', '操作'];
+  const rows = attendanceThresholds.map((item, index) => {
+    const operatorLabel = getThresholdOperatorLabel(item);
+    const limitText = getThresholdLimitText(item);
+    return [
+      '<div class="table-row cols-6">',
+      '<div>' + getStatusLabel(item.statusCode) + '</div>',
+      '<div>' + operatorLabel + '</div>',
+      '<div>' + limitText + '</div>',
+      '<div>' + getTriggerActionLabel(item.triggerAction) + '</div>',
+      '<div>' + (item.enabled ? '是' : '否') + '</div>',
+      '<div>',
+      '<button class="btn btn-secondary" data-action="edit" data-index="' + index + '">编辑</button>',
+      '<button class="btn btn-secondary" data-action="delete" data-index="' + index + '">删除</button>',
+      '</div>',
+      '</div>'
+    ].join('');
+  });
   renderTable(container, headers, rows, 'cols-6');
 }
 
 function resetAttendanceThresholdForm() {
   editingAttendanceThresholdIndex = null;
   document.getElementById('attendanceStatusCode').value = 'work';
-  setDurationInputs('attendanceMinHours', 'attendanceMinMinutes', 0);
-  setDurationInputs('attendanceMaxHours', 'attendanceMaxMinutes', 0);
+  document.getElementById('attendanceThresholdOperator').value = 'less';
+  setDurationInputs('attendanceThresholdHours', 'attendanceThresholdMinutes', 0);
   document.getElementById('attendanceTriggerAction').value = 'show_only';
   document.getElementById('attendanceThresholdEnabled').checked = true;
   document.getElementById('saveAttendanceThreshold').textContent = '保存阈值';
@@ -1592,8 +1734,10 @@ function fillAttendanceThresholdForm(index) {
   if (!item) return;
   editingAttendanceThresholdIndex = index;
   document.getElementById('attendanceStatusCode').value = item.statusCode || 'work';
-  setDurationInputs('attendanceMinHours', 'attendanceMinMinutes', item.minSeconds || 0);
-  setDurationInputs('attendanceMaxHours', 'attendanceMaxMinutes', item.maxSeconds || 0);
+  const operator = item.minSeconds && !item.maxSeconds ? 'less' : (item.maxSeconds && !item.minSeconds ? 'greater' : (item.minSeconds ? 'less' : 'greater'));
+  document.getElementById('attendanceThresholdOperator').value = operator;
+  const valueSeconds = operator === 'greater' ? (item.maxSeconds || 0) : (item.minSeconds || 0);
+  setDurationInputs('attendanceThresholdHours', 'attendanceThresholdMinutes', valueSeconds);
   document.getElementById('attendanceTriggerAction').value = item.triggerAction || 'show_only';
   document.getElementById('attendanceThresholdEnabled').checked = !!item.enabled;
   document.getElementById('saveAttendanceThreshold').textContent = '更新阈值';
@@ -1601,18 +1745,16 @@ function fillAttendanceThresholdForm(index) {
 
 function saveAttendanceThreshold() {
   const statusCode = document.getElementById('attendanceStatusCode').value;
-  const minSeconds = readDurationSeconds('attendanceMinHours', 'attendanceMinMinutes');
-  const maxSeconds = readDurationSeconds('attendanceMaxHours', 'attendanceMaxMinutes');
+  const operator = document.getElementById('attendanceThresholdOperator').value;
+  const valueSeconds = readDurationSeconds('attendanceThresholdHours', 'attendanceThresholdMinutes');
   const triggerAction = document.getElementById('attendanceTriggerAction').value;
   const enabled = document.getElementById('attendanceThresholdEnabled').checked;
-  if (!minSeconds && !maxSeconds) {
-    setStatus('请至少填写最小或最大阈值', document.getElementById('attendanceThresholdStatus'));
+  if (!valueSeconds) {
+    setStatus('请填写阈值时长', document.getElementById('attendanceThresholdStatus'));
     return;
   }
-  if (minSeconds && maxSeconds && minSeconds > maxSeconds) {
-    setStatus('最小阈值不能大于最大阈值', document.getElementById('attendanceThresholdStatus'));
-    return;
-  }
+  const minSeconds = operator === 'less' ? valueSeconds : 0;
+  const maxSeconds = operator === 'greater' ? valueSeconds : 0;
   const item = {
     statusCode: statusCode,
     minSeconds: minSeconds,
@@ -2253,6 +2395,23 @@ document.getElementById('liveSearch').addEventListener('input', renderLiveGrid);
 document.getElementById('loadDailyReport').addEventListener('click', loadDailyReport);
 document.getElementById('exportDaily').addEventListener('click', exportDaily);
 document.getElementById('loadTimeline').addEventListener('click', loadTimeline);
+
+const timelineTable = document.getElementById('timelineTable');
+if (timelineTable) {
+  timelineTable.addEventListener('click', (event) => {
+    const btn = event.target.closest('.timeline-toggle');
+    if (!btn) return;
+    const group = btn.dataset.group;
+    if (group === undefined || group === null) return;
+    const rows = timelineTable.querySelectorAll('.timeline-child[data-parent="' + group + '"]');
+    if (!rows || rows.length === 0) return;
+    const shouldShow = rows[0].style.display === 'none';
+    rows.forEach((row) => {
+      row.style.display = shouldShow ? '' : 'none';
+    });
+    btn.textContent = shouldShow ? '收起' : '展开';
+  });
+}
 document.getElementById('loadRank').addEventListener('click', loadRank);
 
 document.getElementById('createAdjustment').addEventListener('click', submitAdjustment);

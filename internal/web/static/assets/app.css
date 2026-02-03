@@ -770,3 +770,30 @@ button, input, select, textarea {
   color: #94a3b8;
 }
 
+
+.table-row.timeline-group {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.table-row.timeline-group .timeline-toggle {
+  margin-right: 10px;
+}
+
+.table-row.timeline-child {
+  opacity: 0.86;
+  font-size: 13px;
+}
+
+.table-row.timeline-child > div:first-child {
+  padding-left: 26px;
+  position: relative;
+  color: var(--color-muted);
+}
+
+.table-row.timeline-child > div:first-child::before {
+  content: '↳';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--color-muted);
+}

@@ -30,18 +30,18 @@ type ClientBindResponse struct {
 }
 
 type ClientCheckoutPayload struct {
-    TemplateID int64             `json:"templateId"`
-    Data       map[string]string `json:"data"`
+	TemplateID int64             `json:"templateId"`
+	Data       map[string]string `json:"data"`
 }
 
 type ClientReportRequest struct {
-    ProcessName   string `json:"processName"`
-    WindowTitle   string `json:"windowTitle"`
-    IdleSeconds   int32  `json:"idleSeconds"`
-    ClientVersion string `json:"clientVersion"`
-    ReportType    string `json:"reportType"`
-    Checkout      *ClientCheckoutPayload `json:"checkout"`
-    Reason        string `json:"reason"`
+	ProcessName   string                 `json:"processName"`
+	WindowTitle   string                 `json:"windowTitle"`
+	IdleSeconds   int32                  `json:"idleSeconds"`
+	ClientVersion string                 `json:"clientVersion"`
+	ReportType    string                 `json:"reportType"`
+	Checkout      *ClientCheckoutPayload `json:"checkout"`
+	Reason        string                 `json:"reason"`
 }
 
 type ClientReportResponse struct {
@@ -400,6 +400,32 @@ func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID
 		return
 	}
 
+	status = strings.TrimSpace(status)
+	source = strings.TrimSpace(source)
+	description = strings.TrimSpace(description)
+
+	if h.DB != nil {
+		var lastID int64
+		var lastEnd time.Time
+		var lastStatus string
+		var lastSource string
+		var lastDesc sql.NullString
+
+		err := h.DB.QueryRowContext(ctx, `SELECT id, end_at, status, description, source
+FROM time_segments WHERE employee_id = ? ORDER BY end_at DESC, id DESC LIMIT 1`, employeeID).Scan(&lastID, &lastEnd, &lastStatus, &lastDesc, &lastSource)
+		if err == nil {
+			lastDescription := strings.TrimSpace(nullString(lastDesc))
+			if lastEnd.Equal(start) && lastStatus == status && lastSource == source && lastDescription == description {
+				if result, err := h.DB.ExecContext(ctx, "UPDATE time_segments SET end_at = ? WHERE id = ? AND end_at = ?", end, lastID, lastEnd); err == nil {
+					if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows > 0 {
+						h.addDailyStatsByRange(ctx, employeeID, status, start, end)
+						return
+					}
+				}
+			}
+		}
+	}
+
 	_ = h.Queries.CreateTimeSegment(ctx, sqlc.CreateTimeSegmentParams{
 		EmployeeID:  employeeID,
 		StartAt:     start,
@@ -409,6 +435,10 @@ func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID
 		Source:      sqlc.TimeSegmentsSource(source),
 	})
 
+	h.addDailyStatsByRange(ctx, employeeID, status, start, end)
+}
+
+func (h *Handler) addDailyStatsByRange(ctx context.Context, employeeID int64, status string, start time.Time, end time.Time) {
 	for _, part := range splitByDay(start, end) {
 		increments := buildDailyStatIncrement(status, part.Seconds)
 		_ = h.Queries.AddDailyStats(ctx, sqlc.AddDailyStatsParams{
@@ -559,14 +589,3 @@ func parseVersionParts(version string) []int {
 	}
 	return values
 }
-
-
-
-
-
-
-
-
-
-
-
