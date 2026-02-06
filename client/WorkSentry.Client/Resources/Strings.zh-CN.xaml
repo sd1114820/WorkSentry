@@ -9,11 +9,23 @@
   <sys:String x:Key="StatusOff">已下班</sys:String>
   <sys:String x:Key="StatusConnecting">连接中</sys:String>
   <sys:String x:Key="StatusNetwork">网络异常</sys:String>
+  <sys:String x:Key="StatusServerError">服务端异常</sys:String>
+  <sys:String x:Key="StatusConfigError">配置错误</sys:String>
+  <sys:String x:Key="StatusAuthError">登录失效</sys:String>
+  <sys:String x:Key="StatusEmployeeNotFound">工号不存在</sys:String>
+  <sys:String x:Key="StatusEmployeeDisabled">员工已停用</sys:String>
+  <sys:String x:Key="StatusDeviceMismatch">设备不匹配</sys:String>
   <sys:String x:Key="LastReportLabel">最后上报时间</sys:String>
   <sys:String x:Key="LastReportPlaceholder">-</sys:String>
   <sys:String x:Key="LastReportMonitoring">正在监控中...</sys:String>
   <sys:String x:Key="LastReportConnecting">正在连接服务端...</sys:String>
   <sys:String x:Key="LastReportNetwork">无法连接服务端，正在重试...</sys:String>
+  <sys:String x:Key="LastReportServerError">服务端异常，请稍后重试...</sys:String>
+  <sys:String x:Key="LastReportConfigError">配置错误，请检查服务端地址...</sys:String>
+  <sys:String x:Key="LastReportAuthError">登录状态失效，请重新开始上班...</sys:String>
+  <sys:String x:Key="LastReportEmployeeNotFound">工号不存在，请检查工号...</sys:String>
+  <sys:String x:Key="LastReportEmployeeDisabled">员工已停用，请联系管理员...</sys:String>
+  <sys:String x:Key="LastReportDeviceMismatch">设备不匹配，请联系管理员...</sys:String>
   <sys:String x:Key="UpdatePolicyLabel">更新策略</sys:String>
   <sys:String x:Key="UpdatePolicyHint">提示更新</sys:String>
   <sys:String x:Key="UpdatePolicyForce">强制更新</sys:String>
@@ -57,6 +69,16 @@
   <sys:String x:Key="MsgFillEmployeeCode">请先填写工号</sys:String>
   <sys:String x:Key="MsgNeedStopToEdit">请先下班再修改工号</sys:String>
   <sys:String x:Key="MsgStartFailedTitle">启动失败</sys:String>
+  <sys:String x:Key="ErrNetworkWithConfigFormat">网络连接失败，请检查网络或服务端地址配置（{0}）。</sys:String>
+  <sys:String x:Key="ErrTimeoutWithConfigFormat">请求超时，请检查网络或服务端地址配置（{0}）。</sys:String>
+  <sys:String x:Key="ErrConfigServerUrlInvalidWithConfigFormat">服务端地址格式错误，请检查配置文件（{0}）。</sys:String>
+  <sys:String x:Key="ErrServerError">服务端异常，请稍后重试。</sys:String>
+  <sys:String x:Key="ErrEmployeeNotFound">工号不存在，请检查工号是否正确。</sys:String>
+  <sys:String x:Key="ErrEmployeeDisabled">当前员工已停用，请联系管理员。</sys:String>
+  <sys:String x:Key="ErrDeviceMismatch">当前设备与工号绑定不一致，请联系管理员解绑。</sys:String>
+  <sys:String x:Key="ErrAuthInvalid">登录状态失效，请重新开始上班。</sys:String>
+  <sys:String x:Key="ErrUpgradeRequired">客户端版本过旧，请先更新客户端。</sys:String>
+  <sys:String x:Key="ErrRetryLater">请求发送过于频繁，正在重试，请稍后再试。</sys:String>
   <sys:String x:Key="MsgSingleInstance">客户端已在运行，请勿重复启动。</sys:String>
   <sys:String x:Key="DialogTitleTip">提示</sys:String>
   <sys:String x:Key="CloseToTrayTitle">已最小化到托盘</sys:String>
@@ -80,7 +102,9 @@
   <sys:String x:Key="UpdateProgressDetail">{0}：{1} / {2}（{3:0.0}%）</sys:String>
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}：已下载 {1}</sys:String>
   <sys:String x:Key="MsgWorkStartFailed">无法连接服务端，无法开始上班。</sys:String>
+  <sys:String x:Key="MsgWorkStartFailedWithReason">开始上班失败：{0}</sys:String>
   <sys:String x:Key="MsgWorkEndFailed">无法连接服务端，无法下班，请稍后重试。</sys:String>
+  <sys:String x:Key="MsgWorkEndFailedWithReason">下班失败：{0}</sys:String>
   <sys:String x:Key="MsgExitNeedStop">当前已上班，退出前请先下班。</sys:String>
   <sys:String x:Key="CheckoutTitle">下班录入</sys:String>
   <sys:String x:Key="CheckoutSubtitle">请填写以下信息后下班</sys:String>
@@ -93,6 +117,7 @@
   <sys:String x:Key="CheckoutErrorSelect">{0}选项无效</sys:String>
   <sys:String x:Key="CheckoutErrorLength">{0}长度不能超过{1}</sys:String>
   <sys:String x:Key="MsgCheckoutTemplateFailed">读取下班模板失败，请稍后重试。</sys:String>
+  <sys:String x:Key="MsgCheckoutTemplateFailedWithReason">读取下班模板失败：{0}</sys:String>
   <sys:String x:Key="WorkEndReasonTitle">下班说明</sys:String>
   <sys:String x:Key="WorkEndReasonSubtitle">存在未达标或异常情况，请填写说明后下班</sys:String>
   <sys:String x:Key="WorkEndReasonViolations">未达标项</sys:String>
@@ -105,5 +130,5 @@
   <sys:String x:Key="BreakStopButton">结束休息</sys:String>
   <sys:String x:Key="TrayBreakStart">开始休息</sys:String>
   <sys:String x:Key="TrayBreakStop">结束休息</sys:String>
-  <sys:String x:Key="StatusBreak">休息中</sys:String></ResourceDictionary>
-
+  <sys:String x:Key="StatusBreak">休息中</sys:String>
+</ResourceDictionary>

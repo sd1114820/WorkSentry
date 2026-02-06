@@ -193,6 +193,12 @@ internal sealed partial class MainWindow : Window
             "已上班" => (WorkingForeground, WorkingCardBackground, WorkingCardBorder, WorkingIcon),
             "休息中" => (BreakForeground, BreakCardBackground, BreakCardBorder, BreakIcon),
             "网络异常" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "服务端异常" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "配置错误" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "登录失效" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "工号不存在" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "员工已停用" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
+            "设备不匹配" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
             "已下班" => (OffForeground, OffCardBackground, OffCardBorder, OffIcon),
             "连接中" => (IdleForeground, IdleCardBackground, IdleCardBorder, IdleIcon),
             "需要更新" => (NetworkForeground, NetworkCardBackground, NetworkCardBorder, NetworkIcon),
@@ -209,6 +215,30 @@ internal sealed partial class MainWindow : Window
         else if (status == "网络异常")
         {
             LastReportText.Text = LanguageService.GetString("LastReportNetwork");
+        }
+        else if (status == "服务端异常")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportServerError");
+        }
+        else if (status == "配置错误")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportConfigError");
+        }
+        else if (status == "登录失效")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportAuthError");
+        }
+        else if (status == "工号不存在")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportEmployeeNotFound");
+        }
+        else if (status == "员工已停用")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportEmployeeDisabled");
+        }
+        else if (status == "设备不匹配")
+        {
+            LastReportText.Text = LanguageService.GetString("LastReportDeviceMismatch");
         }
         else if (status == "已上班" && !_lastReportTime.HasValue)
         {

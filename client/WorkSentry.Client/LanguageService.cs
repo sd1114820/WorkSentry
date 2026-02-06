@@ -113,6 +113,12 @@ internal static class LanguageService
             "已下班" => GetString("StatusOff"),
             "连接中" => GetString("StatusConnecting"),
             "网络异常" => GetString("StatusNetwork"),
+            "服务端异常" => GetString("StatusServerError"),
+            "配置错误" => GetString("StatusConfigError"),
+            "登录失效" => GetString("StatusAuthError"),
+            "工号不存在" => GetString("StatusEmployeeNotFound"),
+            "员工已停用" => GetString("StatusEmployeeDisabled"),
+            "设备不匹配" => GetString("StatusDeviceMismatch"),
             "需要更新" => GetString("StatusNeedUpdate"),
             "配置已保存" => GetString("StatusConfigSaved"),
             _ => statusToken
@@ -215,4 +221,3 @@ internal static class LanguageService
         return System.Windows.Application.Current.Resources.MergedDictionaries.Any(d => d.Source != null && d.Source.OriginalString.StartsWith("Resources/Strings.", StringComparison.OrdinalIgnoreCase));
     }
 }
-

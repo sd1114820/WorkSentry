@@ -9,11 +9,23 @@
   <sys:String x:Key="StatusOff">Off work</sys:String>
   <sys:String x:Key="StatusConnecting">Connecting</sys:String>
   <sys:String x:Key="StatusNetwork">Network issue</sys:String>
+  <sys:String x:Key="StatusServerError">Server issue</sys:String>
+  <sys:String x:Key="StatusConfigError">Configuration error</sys:String>
+  <sys:String x:Key="StatusAuthError">Session expired</sys:String>
+  <sys:String x:Key="StatusEmployeeNotFound">Employee ID not found</sys:String>
+  <sys:String x:Key="StatusEmployeeDisabled">Employee disabled</sys:String>
+  <sys:String x:Key="StatusDeviceMismatch">Device mismatch</sys:String>
   <sys:String x:Key="LastReportLabel">Last report</sys:String>
   <sys:String x:Key="LastReportPlaceholder">-</sys:String>
   <sys:String x:Key="LastReportMonitoring">Monitoring...</sys:String>
   <sys:String x:Key="LastReportConnecting">Connecting to server...</sys:String>
   <sys:String x:Key="LastReportNetwork">Unable to reach server, retrying...</sys:String>
+  <sys:String x:Key="LastReportServerError">Server issue, retry later...</sys:String>
+  <sys:String x:Key="LastReportConfigError">Configuration error, check server URL...</sys:String>
+  <sys:String x:Key="LastReportAuthError">Session expired, please clock in again...</sys:String>
+  <sys:String x:Key="LastReportEmployeeNotFound">Employee ID not found, please verify...</sys:String>
+  <sys:String x:Key="LastReportEmployeeDisabled">Employee is disabled, contact admin...</sys:String>
+  <sys:String x:Key="LastReportDeviceMismatch">Device mismatch, contact admin to unbind...</sys:String>
   <sys:String x:Key="UpdatePolicyLabel">Update policy</sys:String>
   <sys:String x:Key="UpdatePolicyHint">Optional update</sys:String>
   <sys:String x:Key="UpdatePolicyForce">Forced update</sys:String>
@@ -57,6 +69,16 @@
   <sys:String x:Key="MsgFillEmployeeCode">Please enter your employee ID first.</sys:String>
   <sys:String x:Key="MsgNeedStopToEdit">Please clock out before editing the ID.</sys:String>
   <sys:String x:Key="MsgStartFailedTitle">Start failed</sys:String>
+  <sys:String x:Key="ErrNetworkWithConfigFormat">Network request failed. Check network or server URL in {0}.</sys:String>
+  <sys:String x:Key="ErrTimeoutWithConfigFormat">Request timed out. Check network or server URL in {0}.</sys:String>
+  <sys:String x:Key="ErrConfigServerUrlInvalidWithConfigFormat">Server URL is invalid. Check config file {0}.</sys:String>
+  <sys:String x:Key="ErrServerError">Server error. Please try again later.</sys:String>
+  <sys:String x:Key="ErrEmployeeNotFound">Employee ID was not found. Please verify your ID.</sys:String>
+  <sys:String x:Key="ErrEmployeeDisabled">This employee is disabled. Contact an administrator.</sys:String>
+  <sys:String x:Key="ErrDeviceMismatch">This device does not match the bound device. Contact an administrator to unbind it.</sys:String>
+  <sys:String x:Key="ErrAuthInvalid">Session expired. Please clock in again.</sys:String>
+  <sys:String x:Key="ErrUpgradeRequired">Client version is outdated. Please update first.</sys:String>
+  <sys:String x:Key="ErrRetryLater">Requests are being retried. Please try again shortly.</sys:String>
   <sys:String x:Key="MsgSingleInstance">The client is already running.</sys:String>
   <sys:String x:Key="DialogTitleTip">Notice</sys:String>
   <sys:String x:Key="CloseToTrayTitle">Minimized to tray</sys:String>
@@ -80,7 +102,9 @@
   <sys:String x:Key="UpdateProgressDetail">{0}: {1} / {2} ({3:0.0}%)</sys:String>
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}: downloaded {1}</sys:String>
   <sys:String x:Key="MsgWorkStartFailed">Cannot reach server. Unable to clock in.</sys:String>
+  <sys:String x:Key="MsgWorkStartFailedWithReason">Clock-in failed: {0}</sys:String>
   <sys:String x:Key="MsgWorkEndFailed">Cannot reach server. Unable to clock out. Please try again.</sys:String>
+  <sys:String x:Key="MsgWorkEndFailedWithReason">Clock-out failed: {0}</sys:String>
   <sys:String x:Key="MsgExitNeedStop">You are working. Please clock out before exiting.</sys:String>
   <sys:String x:Key="CheckoutTitle">Checkout</sys:String>
   <sys:String x:Key="CheckoutSubtitle">Please fill in the following before clocking out</sys:String>
@@ -93,6 +117,7 @@
   <sys:String x:Key="CheckoutErrorSelect">Invalid option for {0}</sys:String>
   <sys:String x:Key="CheckoutErrorLength">{0} cannot exceed {1} characters</sys:String>
   <sys:String x:Key="MsgCheckoutTemplateFailed">Failed to load checkout template. Please try again.</sys:String>
+  <sys:String x:Key="MsgCheckoutTemplateFailedWithReason">Failed to load checkout template: {0}</sys:String>
   <sys:String x:Key="WorkEndReasonTitle">Work End Reason</sys:String>
   <sys:String x:Key="WorkEndReasonSubtitle">Unmet targets or exceptions detected. Please provide a reason to end work.</sys:String>
   <sys:String x:Key="WorkEndReasonViolations">Issues</sys:String>
@@ -105,5 +130,5 @@
   <sys:String x:Key="BreakStopButton">End Break</sys:String>
   <sys:String x:Key="TrayBreakStart">Start Break</sys:String>
   <sys:String x:Key="TrayBreakStop">End Break</sys:String>
-  <sys:String x:Key="StatusBreak">On Break</sys:String></ResourceDictionary>
-
+  <sys:String x:Key="StatusBreak">On Break</sys:String>
+</ResourceDictionary>

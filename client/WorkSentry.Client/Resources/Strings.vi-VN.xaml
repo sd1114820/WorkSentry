@@ -9,11 +9,23 @@
   <sys:String x:Key="StatusOff">Đã tan ca</sys:String>
   <sys:String x:Key="StatusConnecting">Đang kết nối</sys:String>
   <sys:String x:Key="StatusNetwork">Lỗi mạng</sys:String>
+  <sys:String x:Key="StatusServerError">Lỗi máy chủ</sys:String>
+  <sys:String x:Key="StatusConfigError">Lỗi cấu hình</sys:String>
+  <sys:String x:Key="StatusAuthError">Phiên đăng nhập hết hạn</sys:String>
+  <sys:String x:Key="StatusEmployeeNotFound">Không tìm thấy mã nhân viên</sys:String>
+  <sys:String x:Key="StatusEmployeeDisabled">Nhân viên đã bị vô hiệu hóa</sys:String>
+  <sys:String x:Key="StatusDeviceMismatch">Thiết bị không khớp</sys:String>
   <sys:String x:Key="LastReportLabel">Báo cáo gần nhất</sys:String>
   <sys:String x:Key="LastReportPlaceholder">-</sys:String>
   <sys:String x:Key="LastReportMonitoring">Đang giám sát...</sys:String>
   <sys:String x:Key="LastReportConnecting">Đang kết nối máy chủ...</sys:String>
   <sys:String x:Key="LastReportNetwork">Không thể kết nối máy chủ, đang thử lại...</sys:String>
+  <sys:String x:Key="LastReportServerError">Máy chủ gặp lỗi, vui lòng thử lại sau...</sys:String>
+  <sys:String x:Key="LastReportConfigError">Lỗi cấu hình, vui lòng kiểm tra địa chỉ máy chủ...</sys:String>
+  <sys:String x:Key="LastReportAuthError">Phiên đăng nhập đã hết hạn, vui lòng chấm công lại...</sys:String>
+  <sys:String x:Key="LastReportEmployeeNotFound">Không tìm thấy mã nhân viên, vui lòng kiểm tra lại...</sys:String>
+  <sys:String x:Key="LastReportEmployeeDisabled">Nhân viên đã bị vô hiệu hóa, vui lòng liên hệ quản trị...</sys:String>
+  <sys:String x:Key="LastReportDeviceMismatch">Thiết bị không khớp, vui lòng liên hệ quản trị để gỡ ràng buộc...</sys:String>
   <sys:String x:Key="UpdatePolicyLabel">Chính sách cập nhật</sys:String>
   <sys:String x:Key="UpdatePolicyHint">Cập nhật tùy chọn</sys:String>
   <sys:String x:Key="UpdatePolicyForce">Bắt buộc cập nhật</sys:String>
@@ -57,6 +69,16 @@
   <sys:String x:Key="MsgFillEmployeeCode">Vui lòng nhập mã nhân viên trước.</sys:String>
   <sys:String x:Key="MsgNeedStopToEdit">Vui lòng tan ca trước khi chỉnh sửa.</sys:String>
   <sys:String x:Key="MsgStartFailedTitle">Khởi động thất bại</sys:String>
+  <sys:String x:Key="ErrNetworkWithConfigFormat">Yêu cầu mạng thất bại. Vui lòng kiểm tra mạng hoặc địa chỉ máy chủ trong {0}.</sys:String>
+  <sys:String x:Key="ErrTimeoutWithConfigFormat">Yêu cầu bị hết thời gian chờ. Vui lòng kiểm tra mạng hoặc địa chỉ máy chủ trong {0}.</sys:String>
+  <sys:String x:Key="ErrConfigServerUrlInvalidWithConfigFormat">Địa chỉ máy chủ không hợp lệ. Vui lòng kiểm tra tệp cấu hình {0}.</sys:String>
+  <sys:String x:Key="ErrServerError">Máy chủ gặp lỗi. Vui lòng thử lại sau.</sys:String>
+  <sys:String x:Key="ErrEmployeeNotFound">Không tìm thấy mã nhân viên. Vui lòng kiểm tra lại.</sys:String>
+  <sys:String x:Key="ErrEmployeeDisabled">Nhân viên này đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.</sys:String>
+  <sys:String x:Key="ErrDeviceMismatch">Thiết bị này không khớp với thiết bị đã ràng buộc. Vui lòng liên hệ quản trị viên để gỡ ràng buộc.</sys:String>
+  <sys:String x:Key="ErrAuthInvalid">Phiên đăng nhập đã hết hạn. Vui lòng chấm công lại.</sys:String>
+  <sys:String x:Key="ErrUpgradeRequired">Phiên bản client đã cũ. Vui lòng cập nhật trước.</sys:String>
+  <sys:String x:Key="ErrRetryLater">Hệ thống đang tự thử lại yêu cầu. Vui lòng thử lại sau ít phút.</sys:String>
   <sys:String x:Key="MsgSingleInstance">Ứng dụng đang chạy.</sys:String>
   <sys:String x:Key="DialogTitleTip">Thông báo</sys:String>
   <sys:String x:Key="CloseToTrayTitle">Đã thu nhỏ xuống khay</sys:String>
@@ -80,7 +102,9 @@
   <sys:String x:Key="UpdateProgressDetail">{0}: {1} / {2} ({3:0.0}%)</sys:String>
   <sys:String x:Key="UpdateProgressDetailNoTotal">{0}: đã tải {1}</sys:String>
   <sys:String x:Key="MsgWorkStartFailed">Không thể kết nối máy chủ, không thể bắt đầu làm việc.</sys:String>
+  <sys:String x:Key="MsgWorkStartFailedWithReason">Bắt đầu làm việc thất bại: {0}</sys:String>
   <sys:String x:Key="MsgWorkEndFailed">Không thể kết nối máy chủ, không thể kết thúc ca. Vui lòng thử lại.</sys:String>
+  <sys:String x:Key="MsgWorkEndFailedWithReason">Tan ca thất bại: {0}</sys:String>
   <sys:String x:Key="MsgExitNeedStop">Bạn đang làm việc. Vui lòng kết thúc ca trước khi thoát.</sys:String>
   <sys:String x:Key="CheckoutTitle">Ghi nhận tan ca</sys:String>
   <sys:String x:Key="CheckoutSubtitle">Vui lòng điền thông tin trước khi tan ca</sys:String>
@@ -93,6 +117,7 @@
   <sys:String x:Key="CheckoutErrorSelect">Lựa chọn không hợp lệ cho {0}</sys:String>
   <sys:String x:Key="CheckoutErrorLength">{0} không được vượt quá {1} ký tự</sys:String>
   <sys:String x:Key="MsgCheckoutTemplateFailed">Không thể tải mẫu tan ca. Vui lòng thử lại.</sys:String>
+  <sys:String x:Key="MsgCheckoutTemplateFailedWithReason">Không thể tải mẫu tan ca: {0}</sys:String>
   <sys:String x:Key="WorkEndReasonTitle">Lý do kết thúc</sys:String>
   <sys:String x:Key="WorkEndReasonSubtitle">Phát hiện không đạt/ngoại lệ, vui lòng ghi rõ lý do.</sys:String>
   <sys:String x:Key="WorkEndReasonViolations">Mục chưa đạt</sys:String>
@@ -105,5 +130,5 @@
   <sys:String x:Key="BreakStopButton">Kết thúc nghỉ</sys:String>
   <sys:String x:Key="TrayBreakStart">Bắt đầu nghỉ</sys:String>
   <sys:String x:Key="TrayBreakStop">Kết thúc nghỉ</sys:String>
-  <sys:String x:Key="StatusBreak">Đang nghỉ</sys:String></ResourceDictionary>
-
+  <sys:String x:Key="StatusBreak">Đang nghỉ</sys:String>
+</ResourceDictionary>

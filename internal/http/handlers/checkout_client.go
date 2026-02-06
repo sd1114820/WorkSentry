@@ -33,35 +33,35 @@ func (h *Handler) ClientCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 
 	token := readBearerToken(r)
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "缺少令牌")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_missing", "缺少令牌")
 		return
 	}
 
 	clientToken, err := h.Queries.GetToken(r.Context(), token)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusUnauthorized, "令牌无效")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_invalid", "令牌无效")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "令牌校验失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "token_validation_failed", "令牌校验失败")
 		return
 	}
 	if clientToken.Revoked {
-		writeError(w, http.StatusUnauthorized, "令牌已失效")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_revoked", "令牌已失效")
 		return
 	}
 	if clientToken.ExpiresAt.Valid && clientToken.ExpiresAt.Time.Before(time.Now()) {
-		writeError(w, http.StatusUnauthorized, "令牌已过期")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_expired", "令牌已过期")
 		return
 	}
 
 	employee, err := h.Queries.GetEmployeeByID(r.Context(), clientToken.EmployeeID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "员工不存在")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "员工不存在")
 		return
 	}
 	if !employee.Enabled {
-		writeError(w, http.StatusForbidden, "员工已停用")
+		writeErrorWithCode(w, http.StatusForbidden, "employee_disabled", "员工已停用")
 		return
 	}
 
@@ -76,13 +76,13 @@ func (h *Handler) ClientCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "读取模板失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "读取模板失败")
 		return
 	}
 
 	fields, err := h.Queries.ListCheckoutFieldsByTemplate(r.Context(), template.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "读取模板字段失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "读取模板字段失败")
 		return
 	}
 

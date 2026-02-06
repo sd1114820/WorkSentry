@@ -304,12 +304,24 @@ internal sealed class TrayManager : IDisposable
             }
 
             var startResult = await _reportManager.SendWorkStartAsync(CancellationToken.None).ConfigureAwait(false);
-            if (!startResult)
+            if (!startResult.Success)
             {
+                var reason = string.IsNullOrWhiteSpace(startResult.Error)
+                    ? LanguageService.GetString("ErrServerError")
+                    : startResult.Error!;
                 InvokeOnUi(() =>
                 {
-                    System.Windows.MessageBox.Show(LanguageService.GetString("MsgWorkStartFailed"), LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    var message = LanguageService.Format("MsgWorkStartFailedWithReason", reason);
+                    System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    if (startResult.FocusEmployeeCode)
+                    {
+                        _mainWindow.FocusEmployeeCode();
+                    }
                 });
+                if (startResult.FocusEmployeeCode)
+                {
+                    ShowMainWindow();
+                }
                 return;
             }
             await _reportManager.StartAsync().ConfigureAwait(false);
@@ -362,21 +374,29 @@ internal sealed class TrayManager : IDisposable
         ClientCheckoutPayload? checkoutPayload = null;
         if (_reportManager != null)
         {
-            CheckoutTemplateResponse? templateResponse = null;
-            try
+            var templateResult = await _reportManager.GetCheckoutTemplateAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!templateResult.Success)
             {
-                templateResponse = await _reportManager.GetCheckoutTemplateAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(ex.Message);
+                var reason = string.IsNullOrWhiteSpace(templateResult.Error)
+                    ? LanguageService.GetString("ErrServerError")
+                    : templateResult.Error!;
                 InvokeOnUi(() =>
                 {
-                    var message = ex is ApiException ? ex.Message : LanguageService.GetString("MsgCheckoutTemplateFailed");
+                    var message = LanguageService.Format("MsgCheckoutTemplateFailedWithReason", reason);
                     System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    if (templateResult.FocusEmployeeCode)
+                    {
+                        _mainWindow.FocusEmployeeCode();
+                    }
                 });
+                if (templateResult.FocusEmployeeCode)
+                {
+                    ShowMainWindow();
+                }
                 return false;
             }
+
+            var templateResponse = templateResult.Value;
 
             if (templateResponse != null && templateResponse.Exists)
             {
@@ -422,9 +442,10 @@ internal sealed class TrayManager : IDisposable
             {
                 InvokeOnUi(() =>
                 {
-                    var message = string.IsNullOrWhiteSpace(stopResult.Error)
-                        ? LanguageService.GetString("MsgWorkEndFailed")
+                    var reason = string.IsNullOrWhiteSpace(stopResult.Error)
+                        ? LanguageService.GetString("ErrServerError")
                         : stopResult.Error!;
+                    var message = LanguageService.Format("MsgWorkEndFailedWithReason", reason);
                     System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 });
                 return false;
@@ -772,7 +793,3 @@ internal sealed class TrayManager : IDisposable
         System.Windows.Application.Current.Shutdown();
     }
 }
-
-
-
-

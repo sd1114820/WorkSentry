@@ -69,27 +69,27 @@ func (h *Handler) ClientBind(w http.ResponseWriter, r *http.Request) {
 	payload.Fingerprint = strings.TrimSpace(payload.Fingerprint)
 
 	if payload.EmployeeCode == "" || payload.Fingerprint == "" {
-		writeError(w, http.StatusBadRequest, "工号与硬件指纹不能为空")
+		writeErrorWithCode(w, http.StatusBadRequest, "employee_code_or_fingerprint_empty", "工号与硬件指纹不能为空")
 		return
 	}
 
 	employee, err := h.Queries.GetEmployeeByCode(r.Context(), payload.EmployeeCode)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "工号不存在")
+		writeErrorWithCode(w, http.StatusNotFound, "employee_not_found", "工号不存在")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "查询员工失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "查询员工失败")
 		return
 	}
 	if !employee.Enabled {
-		writeError(w, http.StatusForbidden, "员工已停用")
+		writeErrorWithCode(w, http.StatusForbidden, "employee_disabled", "员工已停用")
 		return
 	}
 
 	if employee.FingerprintHash.Valid {
 		if employee.FingerprintHash.String != payload.Fingerprint {
-			writeError(w, http.StatusForbidden, "设备不匹配，请联系管理员解绑")
+			writeErrorWithCode(w, http.StatusForbidden, "device_mismatch", "设备不匹配，请联系管理员解绑")
 			return
 		}
 	} else {
@@ -97,14 +97,14 @@ func (h *Handler) ClientBind(w http.ResponseWriter, r *http.Request) {
 			FingerprintHash: toNullString(payload.Fingerprint),
 			ID:              employee.ID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "绑定失败")
+			writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "绑定失败")
 			return
 		}
 	}
 
 	token, err := generateToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "生成令牌失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "生成令牌失败")
 		return
 	}
 
@@ -116,7 +116,7 @@ func (h *Handler) ClientBind(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:  sql.NullTime{Valid: false},
 		LastSeen:   sql.NullTime{Time: now, Valid: true},
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "创建令牌失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "创建令牌失败")
 		return
 	}
 
@@ -142,25 +142,25 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 
 	token := readBearerToken(r)
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "缺少令牌")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_missing", "缺少令牌")
 		return
 	}
 
 	clientToken, err := h.Queries.GetToken(r.Context(), token)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusUnauthorized, "令牌无效")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_invalid", "令牌无效")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "令牌校验失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "token_validation_failed", "令牌校验失败")
 		return
 	}
 	if clientToken.Revoked {
-		writeError(w, http.StatusUnauthorized, "令牌已失效")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_revoked", "令牌已失效")
 		return
 	}
 	if clientToken.ExpiresAt.Valid && clientToken.ExpiresAt.Time.Before(time.Now()) {
-		writeError(w, http.StatusUnauthorized, "令牌已过期")
+		writeErrorWithCode(w, http.StatusUnauthorized, "token_expired", "令牌已过期")
 		return
 	}
 
@@ -172,11 +172,11 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 
 	employee, err := h.Queries.GetEmployeeByID(r.Context(), clientToken.EmployeeID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "员工不存在")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "员工不存在")
 		return
 	}
 	if !employee.Enabled {
-		writeError(w, http.StatusForbidden, "员工已停用")
+		writeErrorWithCode(w, http.StatusForbidden, "employee_disabled", "员工已停用")
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	settings := h.getSettingsOrDefault(r)
 	if settings.UpdatePolicy == 1 && settings.LatestVersion.Valid {
 		if isVersionOutdated(payload.ClientVersion, settings.LatestVersion.String) {
-			writeError(w, http.StatusUpgradeRequired, "请先更新客户端")
+			writeErrorWithCode(w, http.StatusUpgradeRequired, "upgrade_required", "请先更新客户端")
 			return
 		}
 	}
@@ -197,7 +197,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	reportType := strings.TrimSpace(payload.ReportType)
 	if reportType != "work_end" {
 		if err := h.handleWorkSessionReport(r.Context(), employee.ID, reportType, now); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeErrorWithCode(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 	}
@@ -223,7 +223,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		ClientVersion: toNullString(payload.ClientVersion),
 		IpAddress:     toNullString(clientIP(r)),
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "写入上报失败")
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "写入上报失败")
 		return
 	}
 
@@ -291,7 +291,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 
 	if workEndErr != nil {
 		if typed, ok := workEndErr.(*workEndError); ok {
-			h.writeJSONWithData(w, typed.Status, typed.Message, typed.Code, typed.Data)
+			writeErrorWithCodeData(w, typed.Status, typed.Code, typed.Message, typed.Data)
 		} else {
 			writeError(w, http.StatusBadRequest, workEndErr.Error())
 		}

@@ -6,7 +6,7 @@ namespace WorkSentry.Client;
 
 internal sealed class AppConfig
 {
-    public string ServerUrl { get; set; } = "http://127.0.0.1:8080";
+    public string ServerUrl { get; set; } = "https://kf.biuyoyo.com";
     public string EmployeeCode { get; set; } = "";
     public string ClientVersion { get; set; } = AppConstants.ClientVersion;
     public int IdleThresholdSeconds { get; set; } = 300;

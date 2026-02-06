@@ -50,27 +50,11 @@ internal sealed class ApiClient
         if (response.IsSuccessStatusCode)
         {
             var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败");
+            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败", "invalid_response");
         }
 
         var error = await ReadErrorResponseAsync(response, ct).ConfigureAwait(false);
-        var message = !string.IsNullOrWhiteSpace(error.Message)
-            ? error.Message
-            : $"请求失败: {(int)response.StatusCode}";
-        if (!string.IsNullOrWhiteSpace(error.Code) && string.Equals(error.Code, "need_reason", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new NeedReasonException(response.StatusCode, message, error.Data);
-        }
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-        {
-            throw new UnauthorizedException(message);
-        }
-        if (response.StatusCode == HttpStatusCode.UpgradeRequired)
-        {
-            throw new UpgradeRequiredException(message);
-        }
-
-        throw new ApiException(response.StatusCode, message);
+        throw CreateApiException(response.StatusCode, error);
     }
 
     private async Task<T> PostAsync<T>(string path, object body, string? token, CancellationToken ct)
@@ -89,27 +73,39 @@ internal sealed class ApiClient
         if (response.IsSuccessStatusCode)
         {
             var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败");
+            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败", "invalid_response");
         }
 
         var error = await ReadErrorResponseAsync(response, ct).ConfigureAwait(false);
+        throw CreateApiException(response.StatusCode, error);
+    }
+
+    private Exception CreateApiException(HttpStatusCode statusCode, ApiErrorResponse error)
+    {
         var message = !string.IsNullOrWhiteSpace(error.Message)
             ? error.Message
-            : $"请求失败: {(int)response.StatusCode}";
-        if (!string.IsNullOrWhiteSpace(error.Code) && string.Equals(error.Code, "need_reason", StringComparison.OrdinalIgnoreCase))
+            : $"请求失败: {(int)statusCode}";
+        var code = string.IsNullOrWhiteSpace(error.Code) ? null : error.Code;
+
+        if (string.Equals(code, "need_reason", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NeedReasonException(response.StatusCode, message, error.Data);
-        }
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-        {
-            throw new UnauthorizedException(message);
-        }
-        if (response.StatusCode == HttpStatusCode.UpgradeRequired)
-        {
-            throw new UpgradeRequiredException(message);
+            return new NeedReasonException(statusCode, message, error.Data);
         }
 
-        throw new ApiException(response.StatusCode, message);
+        if (statusCode == HttpStatusCode.Unauthorized)
+        {
+            return new UnauthorizedException(message, code, error.Data);
+        }
+        if (statusCode == HttpStatusCode.Forbidden)
+        {
+            return new ForbiddenException(message, code, error.Data);
+        }
+        if (statusCode == HttpStatusCode.UpgradeRequired)
+        {
+            return new UpgradeRequiredException(message, code, error.Data);
+        }
+
+        return new ApiException(statusCode, message, code, error.Data);
     }
 
     private async Task<ApiErrorResponse> ReadErrorResponseAsync(HttpResponseMessage response, CancellationToken ct)
@@ -137,23 +133,37 @@ internal sealed class ApiClient
 internal class ApiException : Exception
 {
     public HttpStatusCode StatusCode { get; }
+    public string? ErrorCode { get; }
+    public JsonElement? ErrorData { get; }
 
-    public ApiException(HttpStatusCode statusCode, string message) : base(message)
+    public ApiException(HttpStatusCode statusCode, string message, string? errorCode = null, JsonElement? errorData = null) : base(message)
     {
         StatusCode = statusCode;
+        ErrorCode = string.IsNullOrWhiteSpace(errorCode) ? null : errorCode;
+        ErrorData = errorData;
     }
 }
 
 internal sealed class UnauthorizedException : ApiException
 {
-    public UnauthorizedException(string message) : base(HttpStatusCode.Unauthorized, message)
+    public UnauthorizedException(string message, string? errorCode = null, JsonElement? errorData = null)
+        : base(HttpStatusCode.Unauthorized, message, errorCode, errorData)
+    {
+    }
+}
+
+internal sealed class ForbiddenException : ApiException
+{
+    public ForbiddenException(string message, string? errorCode = null, JsonElement? errorData = null)
+        : base(HttpStatusCode.Forbidden, message, errorCode, errorData)
     {
     }
 }
 
 internal sealed class UpgradeRequiredException : ApiException
 {
-    public UpgradeRequiredException(string message) : base(HttpStatusCode.UpgradeRequired, message)
+    public UpgradeRequiredException(string message, string? errorCode = null, JsonElement? errorData = null)
+        : base(HttpStatusCode.UpgradeRequired, message, errorCode, errorData)
     {
     }
 }
@@ -162,12 +172,9 @@ internal sealed class NeedReasonException : ApiException
 {
     public new JsonElement? Data { get; }
 
-    public NeedReasonException(HttpStatusCode statusCode, string message, JsonElement? data) : base(statusCode, message)
+    public NeedReasonException(HttpStatusCode statusCode, string message, JsonElement? data)
+        : base(statusCode, message, "need_reason", data)
     {
         Data = data;
     }
 }
-
-
-
-
