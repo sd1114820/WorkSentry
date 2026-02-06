@@ -4,7 +4,7 @@
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>WorkSentry 管理端</title>
-  <link rel='stylesheet' href='/assets/app.css' />
+  <link rel='stylesheet' href='/assets/app.css?v=20260206-1' />
 </head>
 <body>
   <div class='auth-modal' id='authModal'>
@@ -50,6 +50,7 @@
         <button class='nav-item' data-target='attendance'>工时考核</button>
         <button class='nav-item' data-target='audit'>异常与审计</button>
         <button class='nav-item' data-target='org'>组织与员工</button>
+        <button class='nav-item' data-target='admins'>管理员与安全</button>
         <button class='nav-item' data-target='checkout'>下班录入</button>
       </nav>
       <div class='sidebar-footer'>
@@ -588,6 +589,60 @@
           </div>
         </div>
       </section>
+      <section class='section' id='section-admins'>
+        <div class='section-header'>
+          <div>
+            <h2>管理员与安全</h2>
+            <p class='muted'>支持多管理员协作与个人密码维护</p>
+          </div>
+        </div>
+        <div class='grid-2'>
+          <div class='card'>
+            <h3>管理员账号管理</h3>
+            <div class='form-grid'>
+              <label>
+                <span>管理员账号</span>
+                <input type='text' id='adminUserUsername' placeholder='请输入账号' />
+              </label>
+              <label>
+                <span>显示名称</span>
+                <input type='text' id='adminUserDisplayName' placeholder='留空默认同账号' />
+              </label>
+              <label class='full'>
+                <span>登录密码</span>
+                <input type='password' id='adminUserPassword' placeholder='新增必填，编辑留空表示不修改密码' />
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='saveAdminUser'>保存管理员</button>
+              <button class='btn btn-secondary' id='cancelAdminUser'>取消编辑</button>
+              <span class='form-status' id='adminUserStatus'></span>
+            </div>
+            <div class='table' id='adminUsersTable'></div>
+          </div>
+          <div class='card'>
+            <h3>个人修改密码</h3>
+            <div class='form-grid'>
+              <label class='full'>
+                <span>当前密码</span>
+                <input type='password' id='myCurrentPassword' placeholder='请输入当前密码' />
+              </label>
+              <label class='full'>
+                <span>新密码</span>
+                <input type='password' id='myNewPassword' placeholder='不少于 6 位' />
+              </label>
+              <label class='full'>
+                <span>确认新密码</span>
+                <input type='password' id='myConfirmPassword' placeholder='再次输入新密码' />
+              </label>
+            </div>
+            <div class='form-actions'>
+              <button class='btn btn-primary' id='changeMyPassword'>更新密码</button>
+              <span class='form-status' id='myPasswordStatus'></span>
+            </div>
+          </div>
+        </div>
+      </section>
       <section class='section' id='section-checkout'>
         <div class='section-header'>
           <div>
@@ -741,9 +796,8 @@
     </div>
   </div>
 
-  <script src='/assets/app.js'></script>
+  <script src='/assets/app.js?v=20260206-1'></script>
 </body>
 </html>
-
 
 

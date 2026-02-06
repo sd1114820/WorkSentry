@@ -23,9 +23,11 @@ let editingAdjustmentId = null;
 let editingIncidentId = null;
 let editingDepartmentId = null;
 let editingEmployeeId = null;
+let editingAdminUserId = null;
 
 let departments = [];
 let employees = [];
+let adminUsersCache = [];
 let rulesCache = [];
 let adjustmentsCache = [];
 let incidentsCache = [];
@@ -1433,6 +1435,122 @@ function renderEmployeesTable(items) {
   renderTable(container, headers, rows, 'cols-9');
 }
 
+function resetAdminUserForm() {
+  editingAdminUserId = null;
+  document.getElementById('adminUserUsername').value = '';
+  document.getElementById('adminUserDisplayName').value = '';
+  document.getElementById('adminUserPassword').value = '';
+  document.getElementById('saveAdminUser').textContent = '保存管理员';
+}
+
+function fillAdminUserForm(item) {
+  editingAdminUserId = item.id;
+  document.getElementById('adminUserUsername').value = item.username || '';
+  document.getElementById('adminUserDisplayName').value = item.displayName || '';
+  document.getElementById('adminUserPassword').value = '';
+  document.getElementById('saveAdminUser').textContent = '更新管理员';
+}
+
+function renderAdminUsersTable(items) {
+  const container = document.getElementById('adminUsersTable');
+  const headers = ['账号', '显示名称', '创建时间', '当前登录', '操作'];
+  const rows = items.map((item) => [
+    '<div class="table-row cols-5">',
+    '<div>' + (item.username || '-') + '</div>',
+    '<div>' + (item.displayName || '-') + '</div>',
+    '<div>' + (item.createdAt || '-') + '</div>',
+    '<div>' + (item.isCurrent ? '是' : '-') + '</div>',
+    '<div><button class="btn btn-secondary" data-action="edit" data-id="' + item.id + '">编辑</button></div>',
+    '</div>'
+  ].join(''));
+  renderTable(container, headers, rows, 'cols-5');
+}
+
+async function loadAdminUsers() {
+  try {
+    const items = await fetchJSON('/api/v1/admin/admin-users');
+    adminUsersCache = Array.isArray(items) ? items : [];
+    renderAdminUsersTable(adminUsersCache);
+  } catch (error) {
+    document.getElementById('adminUsersTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
+  }
+}
+
+async function saveAdminUser() {
+  const payload = {
+    id: editingAdminUserId || 0,
+    username: document.getElementById('adminUserUsername').value.trim(),
+    displayName: document.getElementById('adminUserDisplayName').value.trim(),
+    password: document.getElementById('adminUserPassword').value.trim(),
+  };
+
+  if (!payload.username) {
+    setStatus('管理员账号不能为空', document.getElementById('adminUserStatus'));
+    return;
+  }
+  if (!editingAdminUserId && !payload.password) {
+    setStatus('新增管理员必须填写密码', document.getElementById('adminUserStatus'));
+    return;
+  }
+  if (payload.password && payload.password.length < 6) {
+    setStatus('管理员密码至少 6 位', document.getElementById('adminUserStatus'));
+    return;
+  }
+
+  const editingCurrent = !!(editingAdminUserId && adminUsersCache.some((item) => item.id === editingAdminUserId && item.isCurrent));
+
+  try {
+    await fetchJSON('/api/v1/admin/admin-users', {
+      method: editingAdminUserId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (editingCurrent) {
+      const currentName = payload.displayName || payload.username;
+      adminName = currentName;
+      adminNameValue.textContent = currentName;
+      localStorage.setItem('adminName', currentName);
+    }
+    setStatus('保存成功', document.getElementById('adminUserStatus'));
+    resetAdminUserForm();
+    loadAdminUsers();
+  } catch (error) {
+    setStatus(error.message, document.getElementById('adminUserStatus'));
+  }
+}
+
+async function changeMyPassword() {
+  const currentPassword = document.getElementById('myCurrentPassword').value.trim();
+  const newPassword = document.getElementById('myNewPassword').value.trim();
+  const confirmPassword = document.getElementById('myConfirmPassword').value.trim();
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    setStatus('请填写完整密码信息', document.getElementById('myPasswordStatus'));
+    return;
+  }
+  if (newPassword.length < 6) {
+    setStatus('新密码至少 6 位', document.getElementById('myPasswordStatus'));
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    setStatus('两次输入的新密码不一致', document.getElementById('myPasswordStatus'));
+    return;
+  }
+
+  try {
+    await fetchJSON('/api/v1/admin/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword: currentPassword, newPassword: newPassword }),
+    });
+    document.getElementById('myCurrentPassword').value = '';
+    document.getElementById('myNewPassword').value = '';
+    document.getElementById('myConfirmPassword').value = '';
+    setStatus('密码修改成功', document.getElementById('myPasswordStatus'));
+  } catch (error) {
+    setStatus(error.message, document.getElementById('myPasswordStatus'));
+  }
+}
 const attendanceStatusOptions = [
   { code: 'work', label: '工作' },
   { code: 'normal', label: '常规' },
@@ -2387,6 +2505,7 @@ async function initApp() {
   await loadSettings();
   await loadDepartments();
   await loadEmployees();
+  await loadAdminUsers();
   renderAttendanceStatusOptions();
   await loadAttendanceRules();
   await loadCheckoutTemplates();
@@ -2590,6 +2709,9 @@ document.getElementById('cancelDepartment').addEventListener('click', resetDepar
 
 document.getElementById('saveEmployee').addEventListener('click', saveEmployee);
 document.getElementById('cancelEmployee').addEventListener('click', resetEmployeeForm);
+document.getElementById('saveAdminUser').addEventListener('click', saveAdminUser);
+document.getElementById('cancelAdminUser').addEventListener('click', resetAdminUserForm);
+document.getElementById('changeMyPassword').addEventListener('click', changeMyPassword);
 
 document.getElementById('rulesTable').addEventListener('click', (event) => {
   const btn = event.target.closest('button');
@@ -2683,6 +2805,17 @@ document.getElementById('employeesTable').addEventListener('click', (event) => {
   }
 });
 
+document.getElementById('adminUsersTable').addEventListener('click', (event) => {
+  const btn = event.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.action !== 'edit') return;
+  const id = Number(btn.dataset.id || 0);
+  if (!id) return;
+  const item = adminUsersCache.find((row) => row.id === id);
+  if (item) {
+    fillAdminUserForm(item);
+  }
+});
 switchSection('live');
 
 if (authToken) {
@@ -2691,15 +2824,4 @@ if (authToken) {
 } else {
   showLogin();
 }
-
-
-
-
-
-
-
-
-
-
-
 
