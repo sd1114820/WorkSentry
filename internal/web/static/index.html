@@ -4,7 +4,7 @@
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>WorkSentry 管理端</title>
-  <link rel='stylesheet' href='/assets/app.css?v=20260206-1' />
+  <link rel='stylesheet' href='/assets/app.css?v=20260301-2' />
 </head>
 <body>
   <div class='auth-modal' id='authModal'>
@@ -85,22 +85,66 @@
         <div class='section-header'>
           <div>
             <h2>实时监控大屏</h2>
-            <p class='muted'>显示上一次状态与延迟倒计时，超时自动离线</p>
+            <p class='muted'>异常优先聚焦，支持值班盯盘与排查切换</p>
           </div>
           <div class='section-actions'>
-            <input class='search-input' type='search' id='liveSearch' placeholder='搜索姓名 / 工号 / 部门' />
+            <div class='live-mode-switch' id='liveModeSwitch'>
+              <button class='btn btn-secondary live-mode-btn' id='liveModeWatch' data-mode='watch'>盯盘模式</button>
+              <button class='btn btn-secondary live-mode-btn' id='liveModeInvestigate' data-mode='investigate'>排查模式</button>
+            </div>
             <button class='btn btn-secondary' id='refreshLive'>刷新</button>
           </div>
         </div>
-        <div class='card'>
-          <div class='live-legend'>
-            <span class='legend-item'><span class='dot work'></span>工作</span>
-            <span class='legend-item'><span class='dot normal'></span>常规</span>
-            <span class='legend-item'><span class='dot fish'></span>摸鱼</span>
-            <span class='legend-item'><span class='dot idle'></span>离开</span>
-            <span class='legend-item'><span class='dot offline'></span>离线</span>
+        <div class='card live-dashboard'>
+          <div class='live-toolbar'>
+            <div class='live-legend live-legend-fixed'>
+              <span class='legend-item'><span class='dot work'></span>工作</span>
+              <span class='legend-item'><span class='dot normal'></span>常规</span>
+              <span class='legend-item'><span class='dot fish'></span>摸鱼</span>
+              <span class='legend-item'><span class='dot idle'></span>离开</span>
+              <span class='legend-item'><span class='dot offline'></span>离线</span>
+              <span class='legend-item'><span class='dot break'></span>休息</span>
+              <span class='legend-item'><span class='dot offwork'></span>已下班</span>
+            </div>
+            <div class='live-filter-row'>
+              <input class='search-input' type='search' id='liveSearch' placeholder='搜索姓名 / 工号 / 部门' />
+              <select id='liveDepartmentFilter'></select>
+              <label class='inline compact'>
+                <input type='checkbox' id='liveOnlyAnomaly' />
+                <span>仅看异常</span>
+              </label>
+            </div>
+            <div class='live-status-filters' id='liveStatusFilters'>
+              <label class='inline compact'><input type='checkbox' value='offline' />离线</label>
+              <label class='inline compact'><input type='checkbox' value='fish' />摸鱼</label>
+              <label class='inline compact'><input type='checkbox' value='idle' />离开</label>
+              <label class='inline compact'><input type='checkbox' value='work' />工作</label>
+              <label class='inline compact'><input type='checkbox' value='normal' />常规</label>
+              <label class='inline compact'><input type='checkbox' value='break' />休息</label>
+              <label class='inline compact'><input type='checkbox' value='offwork' />已下班</label>
+            </div>
           </div>
-          <div class='live-group-list' id='liveGrid'></div>
+          <div class='live-summary-bar' id='liveSummaryBar'></div>
+          <div class='live-main-split'>
+            <div class='live-panel'>
+              <h3>异常看板</h3>
+              <div class='live-anomaly-board' id='liveAnomalyBoard'></div>
+            </div>
+            <div class='live-panel'>
+              <h3>部门健康榜</h3>
+              <div class='live-dept-board' id='liveDeptBoard'></div>
+            </div>
+          </div>
+          <div class='live-normal-section' id='liveNormalSection'>
+            <div class='form-actions'>
+              <button class='btn btn-secondary' id='liveToggleNormal'>展开正常人员（0）</button>
+            </div>
+            <div class='live-normal-list is-collapsed' id='liveNormalList'></div>
+          </div>
+          <div class='live-people-section' id='livePeopleSection'>
+            <h3>全员视图</h3>
+            <div class='live-people-table' id='livePeopleTable'></div>
+          </div>
           <div class='empty-hint' id='liveEmpty'>暂无在线数据</div>
         </div>
       </section>
@@ -796,7 +840,7 @@
     </div>
   </div>
 
-  <script src='/assets/app.js?v=20260206-1'></script>
+  <script src='/assets/app.js?v=20260301-2'></script>
 </body>
 </html>
 

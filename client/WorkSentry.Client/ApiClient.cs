@@ -32,6 +32,10 @@ internal sealed class ApiClient
     {
         return PostAsync<ClientReportResponse>("/api/v1/client/report", request, token, ct);
     }
+    public Task<ClientErrorReportResponse> ReportErrorAsync(ClientErrorReportRequest request, string token, CancellationToken ct)
+    {
+        return PostAsync<ClientErrorReportResponse>("/api/v1/client/error", request, token, ct);
+    }
 
     public Task<CheckoutTemplateResponse> GetCheckoutTemplateAsync(string token, CancellationToken ct)
     {
@@ -178,3 +182,4 @@ internal sealed class NeedReasonException : ApiException
         Data = data;
     }
 }
+

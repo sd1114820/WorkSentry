@@ -15,6 +15,7 @@ func NewRouter(h *handlers.Handler) http.Handler {
 	mux.HandleFunc("/api/v1/client/bind", h.ClientBind)
 	mux.HandleFunc("/api/v1/client/report", h.ClientReport)
 	mux.HandleFunc("/api/v1/client/checkout-template", h.ClientCheckoutTemplate)
+	mux.HandleFunc("/api/v1/client/error", h.ClientError)
 
 	adminOnly := func(fn http.HandlerFunc) http.HandlerFunc {
 		return h.AdminOnly(fn)
@@ -38,6 +39,7 @@ func NewRouter(h *handlers.Handler) http.Handler {
 	mux.HandleFunc("/api/v1/admin/offline-segments", adminOnly(h.OfflineSegments))
 	mux.HandleFunc("/api/v1/admin/system-incidents", adminOnly(h.SystemIncidents))
 	mux.HandleFunc("/api/v1/admin/audit-logs", adminOnly(h.AuditLogs))
+	mux.HandleFunc("/api/v1/admin/client-errors", adminOnly(h.ClientErrors))
 	mux.HandleFunc("/api/v1/admin/departments", adminOnly(h.Departments))
 	mux.HandleFunc("/api/v1/admin/employees", adminOnly(h.Employees))
 	mux.HandleFunc("/api/v1/admin/employees/unbind", adminOnly(h.UnbindEmployee))
@@ -53,3 +55,5 @@ func NewRouter(h *handlers.Handler) http.Handler {
 
 	return h.WithLogging(mux)
 }
+
+

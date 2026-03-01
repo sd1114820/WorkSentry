@@ -106,6 +106,7 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.invalidateRulesCache()
 	h.logAudit(r, "create_rule", "rule", sql.NullInt64{Int64: id, Valid: true}, payload)
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
@@ -142,6 +143,7 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.invalidateRulesCache()
 	h.logAudit(r, "update_rule", "rule", sql.NullInt64{Int64: payload.ID, Valid: true}, payload)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "更新成功"})
 }
@@ -159,6 +161,7 @@ func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.invalidateRulesCache()
 	h.logAudit(r, "delete_rule", "rule", sql.NullInt64{Int64: id, Valid: true}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "删除成功"})
 }

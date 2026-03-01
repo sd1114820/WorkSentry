@@ -97,7 +97,19 @@ internal sealed class ApiErrorResponse
 }
 
 internal sealed record SampleState(string ProcessName, string WindowTitle, int IdleSeconds, bool IsIdle);
+internal sealed class ClientErrorReportRequest
+{
+    public string OccurredAt { get; set; } = "";
+    public string ErrorType { get; set; } = "";
+    public string ExceptionType { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string StackTrace { get; set; } = "";
+    public string ClientVersion { get; set; } = "";
+    public Dictionary<string, string> Context { get; set; } = new();
+}
 
-
-
+internal sealed class ClientErrorReportResponse
+{
+    public bool Accepted { get; set; }
+}
 

@@ -54,6 +54,11 @@ type ClientReportResponse struct {
 	ServerTime               string `json:"serverTime"`
 }
 
+const (
+	tokenLastSeenMinWriteInterval    = 15 * time.Second
+	employeeLastSeenMinWriteInterval = 15 * time.Second
+)
+
 func (h *Handler) ClientBind(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "不支持的请求方式")
@@ -181,10 +186,12 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	_ = h.Queries.UpdateTokenLastSeen(r.Context(), sqlc.UpdateTokenLastSeenParams{
-		LastSeen: sql.NullTime{Time: now, Valid: true},
-		Token:    token,
-	})
+	if shouldUpdateTokenLastSeen(clientToken, now) {
+		_ = h.Queries.UpdateTokenLastSeen(r.Context(), sqlc.UpdateTokenLastSeenParams{
+			LastSeen: sql.NullTime{Time: now, Valid: true},
+			Token:    token,
+		})
+	}
 
 	settings := h.getSettingsOrDefault(r)
 	if settings.UpdatePolicy == 1 && settings.LatestVersion.Valid {
@@ -202,7 +209,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rules, _ := h.Queries.ListEnabledRules(r.Context())
+	rules := h.getEnabledRulesCached(r.Context())
 
 	status := determineStatus(payload.IdleSeconds, settings.IdleThresholdSeconds, payload.ProcessName, payload.WindowTitle, rules)
 	description := buildDescription(payload.ProcessName, payload.WindowTitle)
@@ -227,12 +234,14 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.Queries.UpdateEmployeeLastSeen(r.Context(), sqlc.UpdateEmployeeLastSeenParams{
-		LastSeenAt:      sql.NullTime{Time: now, Valid: true},
-		LastStatus:      sqlc.NullEmployeesLastStatus{EmployeesLastStatus: sqlc.EmployeesLastStatus(status), Valid: true},
-		LastDescription: toNullString(description),
-		ID:              employee.ID,
-	})
+	if shouldUpdateEmployeeLastSeen(employee, status, description, now) {
+		_ = h.Queries.UpdateEmployeeLastSeen(r.Context(), sqlc.UpdateEmployeeLastSeenParams{
+			LastSeenAt:      sql.NullTime{Time: now, Valid: true},
+			LastStatus:      sqlc.NullEmployeesLastStatus{EmployeesLastStatus: sqlc.EmployeesLastStatus(status), Valid: true},
+			LastDescription: toNullString(description),
+			ID:              employee.ID,
+		})
+	}
 
 	if prevErr == nil {
 		segmentStart := prevEvent.ReceivedAt
@@ -307,6 +316,32 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		UpdateURL:                nullString(settings.UpdateUrl),
 		ServerTime:               formatTime(now),
 	})
+}
+
+func shouldUpdateTokenLastSeen(token sqlc.ClientToken, now time.Time) bool {
+	if !token.LastSeen.Valid {
+		return true
+	}
+	return now.Sub(token.LastSeen.Time) >= tokenLastSeenMinWriteInterval
+}
+
+func shouldUpdateEmployeeLastSeen(employee sqlc.Employee, status string, description string, now time.Time) bool {
+	if !employee.LastSeenAt.Valid {
+		return true
+	}
+	if now.Sub(employee.LastSeenAt.Time) >= employeeLastSeenMinWriteInterval {
+		return true
+	}
+	if !employee.LastStatus.Valid {
+		return true
+	}
+	if string(employee.LastStatus.EmployeesLastStatus) != status {
+		return true
+	}
+	if strings.TrimSpace(nullString(employee.LastDescription)) != strings.TrimSpace(description) {
+		return true
+	}
+	return false
 }
 
 func readBearerToken(r *http.Request) string {

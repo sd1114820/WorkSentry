@@ -12,10 +12,45 @@ const navItems = document.querySelectorAll('.nav-item');
 let authToken = localStorage.getItem('adminToken') || '';
 let adminName = localStorage.getItem('adminName') || '';
 let settingsCache = null;
+const liveModeStorageKey = 'liveViewMode';
+const liveOnlyAnomalyStorageKey = 'liveOnlyAnomaly';
+const liveAnomalyStatuses = ['offline', 'fish', 'idle'];
+const liveAnomalyStatusSet = new Set(liveAnomalyStatuses);
+const liveSeverityWeights = { offline: 3, fish: 2, idle: 1 };
+const liveStatusLabels = {
+  work: '工作',
+  normal: '常规',
+  fish: '摸鱼',
+  idle: '离开',
+  offline: '离线',
+  break: '休息',
+  offwork: '已下班',
+};
+const liveVirtualThreshold = 200;
+const liveVirtualRowHeight = 40;
+
 let liveItems = [];
 let liveMap = {};
 let liveTimer = null;
 let wsClient = null;
+let liveDomMap = {};
+let liveRenderQueued = false;
+let liveSearchTimer = null;
+let liveNormalExpanded = false;
+let liveVirtualState = { enabled: false, scrollTop: 0 };
+let liveEventsBound = false;
+
+const savedLiveMode = localStorage.getItem(liveModeStorageKey);
+let liveViewMode = savedLiveMode === 'investigate' ? 'investigate' : 'watch';
+const savedOnlyAnomaly = localStorage.getItem(liveOnlyAnomalyStorageKey);
+let liveFilters = {
+  statuses: [],
+  department: '',
+  keyword: '',
+  onlyAnomaly: savedOnlyAnomaly === null ? liveViewMode === 'watch' : savedOnlyAnomaly === '1',
+};
+let liveSummary = null;
+let liveDeptStats = [];
 let timelineSearchReady = false;
 
 let editingRuleId = null;
@@ -454,94 +489,666 @@ function renderRules(rules) {
 function updateLiveMap(items) {
   liveMap = {};
   items.forEach((item) => {
+    if (!item || !item.employeeCode) return;
     liveMap[item.employeeCode] = item;
   });
 }
 
+function getLiveStatusLabel(statusCode, fallbackLabel) {
+  if (liveStatusLabels[statusCode]) {
+    return liveStatusLabels[statusCode];
+  }
+  if (fallbackLabel) {
+    return fallbackLabel;
+  }
+  return '常规';
+}
+
 function getLiveDisplay(item) {
-  const offlineThreshold = settingsCache ? settingsCache.offlineThresholdSeconds : 0;
-  let statusCode = item.statusCode || 'normal';
-  let statusLabel = item.statusLabel || '常规';
-  let remaining = null;
+  const offlineThreshold = settingsCache ? Number(settingsCache.offlineThresholdSeconds || 0) : 0;
+  const rawStatusCode = item && item.statusCode ? item.statusCode : 'normal';
+  let statusCode = rawStatusCode;
+  let statusLabel = getLiveStatusLabel(statusCode, item && item.statusLabel ? item.statusLabel : '常规');
+
   if (item && (item.working === false || statusCode === 'offwork')) {
     statusCode = 'offwork';
-    statusLabel = item.statusLabel || '已下班';
+    statusLabel = getLiveStatusLabel(statusCode, item.statusLabel);
     return { statusCode: statusCode, statusLabel: statusLabel, remaining: null };
   }
-  const delaySeconds = item.delaySeconds || 0;
+
+  const delaySeconds = Number(item && item.delaySeconds ? item.delaySeconds : 0);
+  let remaining = null;
   if (offlineThreshold > 0) {
     if (delaySeconds > offlineThreshold) {
       statusCode = 'offline';
-      statusLabel = '离线';
+      statusLabel = getLiveStatusLabel(statusCode, '离线');
       remaining = 0;
     } else {
       remaining = offlineThreshold - delaySeconds;
     }
   }
+
+  statusLabel = getLiveStatusLabel(statusCode, statusLabel);
   return { statusCode: statusCode, statusLabel: statusLabel, remaining: remaining };
 }
 
-function renderLiveGrid() {
-  const container = document.getElementById('liveGrid');
-  const empty = document.getElementById('liveEmpty');
-  const keyword = document.getElementById('liveSearch').value.trim().toLowerCase();
-  const filtered = liveItems.filter((item) => {
-    if (!keyword) return true;
-    const text = [item.employeeCode, item.name, item.department || ''].join(' ').toLowerCase();
-    return text.includes(keyword);
-  });
+function computeLiveSummary(items) {
+  const summary = {
+    total: items.length,
+    onDuty: 0,
+    anomaly: 0,
+    statusCount: {
+      work: 0,
+      normal: 0,
+      fish: 0,
+      idle: 0,
+      offline: 0,
+      break: 0,
+      offwork: 0,
+    },
+  };
 
-  if (filtered.length === 0) {
-    container.innerHTML = '';
-    empty.style.display = 'block';
-    return;
-  }
-  empty.style.display = 'none';
-
-  const groups = {};
-  filtered.forEach((item) => {
-    const dept = item.department || '未分配';
-    if (!groups[dept]) {
-      groups[dept] = [];
+  items.forEach((item) => {
+    const display = getLiveDisplay(item);
+    const status = display.statusCode || 'normal';
+    if (summary.statusCount[status] === undefined) {
+      summary.statusCount[status] = 0;
     }
-    groups[dept].push(item);
+    summary.statusCount[status] += 1;
+
+    if (status !== 'offwork') {
+      summary.onDuty += 1;
+    }
+    if (liveAnomalyStatusSet.has(status)) {
+      summary.anomaly += 1;
+    }
   });
 
-  const groupHtml = Object.keys(groups).sort().map((dept) => {
-    const cards = groups[dept].map((item) => {
-      const display = getLiveDisplay(item);
-      const description = item.description || '无活动';
-      return [
-        '<div class="live-card" data-code="' + item.employeeCode + '">',
-        '<div class="status ' + display.statusCode + '">' + display.statusLabel + '</div>',
-        '<div class="name">' + item.name + '（' + item.employeeCode + '）</div>',
-        '<div class="desc">' + description + '</div>',
-        '<div class="meta">' + buildMetaText(item.lastSeen, display.remaining) + '</div>',
-        '</div>'
-      ].join('');
-    }).join('');
-    return [
-      '<div class="live-group">',
-      '<div class="live-group-title">' + dept + '</div>',
-      '<div class="live-grid">' + cards + '</div>',
-      '</div>'
-    ].join('');
-  });
-
-  container.innerHTML = groupHtml.join('');
+  return summary;
 }
 
-function updateLiveCard(card, item) {
+function computeDeptStats(items) {
+  const deptMap = {};
+  items.forEach((item) => {
+    const deptName = item.department || '未分配';
+    if (!deptMap[deptName]) {
+      deptMap[deptName] = {
+        department: deptName,
+        total: 0,
+        anomaly: 0,
+      };
+    }
+
+    const entry = deptMap[deptName];
+    entry.total += 1;
+    const status = getLiveDisplay(item).statusCode;
+    if (liveAnomalyStatusSet.has(status)) {
+      entry.anomaly += 1;
+    }
+  });
+
+  return Object.values(deptMap)
+    .map((entry) => {
+      const rate = entry.total > 0 ? entry.anomaly / entry.total : 0;
+      return {
+        department: entry.department,
+        total: entry.total,
+        anomaly: entry.anomaly,
+        anomalyRate: rate,
+      };
+    })
+    .sort((a, b) => {
+      if (b.anomalyRate !== a.anomalyRate) {
+        return b.anomalyRate - a.anomalyRate;
+      }
+      if (b.anomaly !== a.anomaly) {
+        return b.anomaly - a.anomaly;
+      }
+      if (b.total !== a.total) {
+        return b.total - a.total;
+      }
+      return a.department.localeCompare(b.department, 'zh-CN');
+    });
+}
+
+function buildLiveSearchText(item, display) {
+  return [
+    item.employeeCode || '',
+    item.name || '',
+    item.department || '',
+    item.description || '',
+    display.statusLabel || '',
+  ].join(' ').toLowerCase();
+}
+
+function rankLiveItems(items, filters, mode) {
+  const activeFilters = filters || liveFilters;
+  const statusFilter = new Set((activeFilters.statuses || []).filter(Boolean));
+  const keyword = (activeFilters.keyword || '').trim().toLowerCase();
+  const department = (activeFilters.department || '').trim();
+  const onlyAnomaly = !!activeFilters.onlyAnomaly;
+
+  const ranked = [];
+  items.forEach((item) => {
+    const display = getLiveDisplay(item);
+    const statusCode = display.statusCode || 'normal';
+    const isAnomaly = liveAnomalyStatusSet.has(statusCode);
+
+    if (onlyAnomaly && !isAnomaly) {
+      return;
+    }
+    if (statusFilter.size > 0 && !statusFilter.has(statusCode)) {
+      return;
+    }
+    if (department && (item.department || '未分配') !== department) {
+      return;
+    }
+    if (keyword) {
+      const text = buildLiveSearchText(item, display);
+      if (!text.includes(keyword)) {
+        return;
+      }
+    }
+
+    ranked.push({
+      item: item,
+      display: display,
+      statusCode: statusCode,
+      isAnomaly: isAnomaly,
+      severity: liveSeverityWeights[statusCode] || 0,
+      delaySeconds: Number(item.delaySeconds || 0),
+    });
+  });
+
+  ranked.sort((a, b) => {
+    if (a.isAnomaly !== b.isAnomaly) {
+      return a.isAnomaly ? -1 : 1;
+    }
+    if (a.isAnomaly && a.severity !== b.severity) {
+      return b.severity - a.severity;
+    }
+    if (b.delaySeconds !== a.delaySeconds) {
+      return b.delaySeconds - a.delaySeconds;
+    }
+    const deptA = a.item.department || '';
+    const deptB = b.item.department || '';
+    const deptCompare = deptA.localeCompare(deptB, 'zh-CN');
+    if (deptCompare !== 0) {
+      return deptCompare;
+    }
+    const nameCompare = (a.item.name || '').localeCompare((b.item.name || ''), 'zh-CN');
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+    return (a.item.employeeCode || '').localeCompare((b.item.employeeCode || ''));
+  });
+
+  return ranked;
+}
+
+function getLiveDelayText(display) {
+  if (display.remaining === null || display.remaining === undefined) {
+    return '-';
+  }
+  return formatCountdown(display.remaining);
+}
+
+function buildLiveItemRow(record, extraClass) {
+  const item = record.item;
+  const display = record.display;
+  const classes = ['live-item-row'];
+  if (record.isAnomaly) {
+    classes.push('is-anomaly');
+  } else {
+    classes.push('is-normal');
+  }
+  if (extraClass) {
+    classes.push(extraClass);
+  }
+
+  return [
+    '<div class="' + classes.join(' ') + '" data-live-code="' + item.employeeCode + '">',
+    '<div class="live-item-main">',
+    '<div class="live-item-name">' + item.name + '（' + item.employeeCode + '）</div>',
+    '<div class="live-item-status-wrap">',
+    '<span class="live-item-status ' + display.statusCode + '">' + display.statusLabel + '</span>',
+    '<span class="live-item-delay-label">延迟</span>',
+    '<span class="live-item-delay">' + getLiveDelayText(display) + '</span>',
+    '</div>',
+    '</div>',
+    '<div class="live-item-sub">',
+    '<span class="live-item-dept">' + (item.department || '未分配') + '</span>',
+    '<span class="live-item-last">上次：' + (item.lastSeen || '-') + '</span>',
+    '<span class="live-item-desc">' + (item.description || '无活动') + '</span>',
+    '</div>',
+    '</div>'
+  ].join('');
+}
+
+function buildPeopleTableHeader() {
+  return [
+    '<div class="live-table-header">',
+    '<div>人员</div>',
+    '<div>状态</div>',
+    '<div>延迟</div>',
+    '<div>部门</div>',
+    '<div>上次活动</div>',
+    '<div>说明</div>',
+    '</div>'
+  ].join('');
+}
+
+function buildPeopleTableRow(record) {
+  const item = record.item;
+  const display = record.display;
+  return [
+    '<div class="live-table-row" data-live-code="' + item.employeeCode + '">',
+    '<div class="live-item-name">' + item.name + '（' + item.employeeCode + '）</div>',
+    '<div><span class="live-item-status ' + display.statusCode + '">' + display.statusLabel + '</span></div>',
+    '<div class="live-item-delay">' + getLiveDelayText(display) + '</div>',
+    '<div class="live-item-dept">' + (item.department || '未分配') + '</div>',
+    '<div class="live-item-last">上次：' + (item.lastSeen || '-') + '</div>',
+    '<div class="live-item-desc">' + (item.description || '无活动') + '</div>',
+    '</div>'
+  ].join('');
+}
+
+function rebuildLiveDomMap() {
+  liveDomMap = {};
+  document.querySelectorAll('[data-live-code]').forEach((root) => {
+    const code = root.dataset.liveCode;
+    if (!code) {
+      return;
+    }
+    const refs = {
+      root: root,
+      status: root.querySelector('.live-item-status'),
+      delay: root.querySelector('.live-item-delay'),
+      dept: root.querySelector('.live-item-dept'),
+      last: root.querySelector('.live-item-last'),
+      desc: root.querySelector('.live-item-desc'),
+      name: root.querySelector('.live-item-name'),
+    };
+    if (!liveDomMap[code]) {
+      liveDomMap[code] = [];
+    }
+    liveDomMap[code].push(refs);
+  });
+}
+
+function patchLiveRefs(refs, item) {
+  if (!refs || !refs.root || !document.body.contains(refs.root)) {
+    return;
+  }
   const display = getLiveDisplay(item);
-  const statusEl = card.querySelector('.status');
-  const metaEl = card.querySelector('.meta');
-  if (statusEl) {
-    statusEl.textContent = display.statusLabel;
-    statusEl.className = 'status ' + display.statusCode;
+  if (refs.status) {
+    refs.status.textContent = display.statusLabel;
+    refs.status.className = 'live-item-status ' + display.statusCode;
   }
-  if (metaEl) {
-    metaEl.textContent = buildMetaText(item.lastSeen, display.remaining);
+  if (refs.delay) {
+    refs.delay.textContent = getLiveDelayText(display);
   }
+  if (refs.dept) {
+    refs.dept.textContent = item.department || '未分配';
+  }
+  if (refs.last) {
+    refs.last.textContent = '上次：' + (item.lastSeen || '-');
+  }
+  if (refs.desc) {
+    refs.desc.textContent = item.description || '无活动';
+  }
+  if (refs.name) {
+    refs.name.textContent = (item.name || '未知人员') + '（' + item.employeeCode + '）';
+  }
+}
+
+function patchLiveItem(item) {
+  if (!item || !item.employeeCode) {
+    return false;
+  }
+  const refsList = liveDomMap[item.employeeCode];
+  if (!Array.isArray(refsList) || refsList.length === 0) {
+    return false;
+  }
+  refsList.forEach((refs) => {
+    patchLiveRefs(refs, item);
+  });
+  return true;
+}
+
+function renderLiveSummaryBar() {
+  const container = document.getElementById('liveSummaryBar');
+  if (!container || !liveSummary) {
+    return;
+  }
+  const topDept = liveDeptStats.length > 0 ? liveDeptStats[0] : null;
+  const topDeptText = topDept
+    ? topDept.department + '（异常率 ' + Math.round(topDept.anomalyRate * 100) + '%）'
+    : '暂无';
+
+  const cards = [
+    '<button class="live-summary-chip" type="button" data-live-filter="all"><span>总人数</span><strong>' + liveSummary.total + '</strong></button>',
+    '<button class="live-summary-chip" type="button" data-live-filter="onduty"><span>在岗人数</span><strong>' + liveSummary.onDuty + '</strong></button>',
+    '<button class="live-summary-chip danger" type="button" data-live-filter="anomaly"><span>异常人数</span><strong>' + liveSummary.anomaly + '</strong></button>',
+    '<button class="live-summary-chip danger" type="button" data-live-filter="offline"><span>离线</span><strong>' + (liveSummary.statusCount.offline || 0) + '</strong></button>',
+    '<button class="live-summary-chip danger" type="button" data-live-filter="fish"><span>摸鱼</span><strong>' + (liveSummary.statusCount.fish || 0) + '</strong></button>',
+    '<button class="live-summary-chip danger" type="button" data-live-filter="idle"><span>离开</span><strong>' + (liveSummary.statusCount.idle || 0) + '</strong></button>',
+    '<div class="live-summary-chip plain"><span>异常最重部门</span><strong>' + topDeptText + '</strong></div>'
+  ];
+  container.innerHTML = cards.join('');
+}
+
+function renderAnomalyBoard(records) {
+  const container = document.getElementById('liveAnomalyBoard');
+  if (!container) {
+    return;
+  }
+  if (!records || records.length === 0) {
+    container.innerHTML = '<div class="empty-hint">当前无异常人员</div>';
+    return;
+  }
+
+  const grouped = { offline: [], fish: [], idle: [] };
+  records.forEach((record) => {
+    if (!record.isAnomaly) {
+      return;
+    }
+    if (!grouped[record.statusCode]) {
+      grouped[record.statusCode] = [];
+    }
+    grouped[record.statusCode].push(record);
+  });
+
+  const groupOrder = ['offline', 'fish', 'idle'];
+  const html = groupOrder.map((status) => {
+    const list = grouped[status] || [];
+    if (list.length === 0) {
+      return '';
+    }
+    const title = getLiveStatusLabel(status, status);
+    const rows = list.map((record) => buildLiveItemRow(record, 'compact')).join('');
+    return [
+      '<div class="live-anomaly-group">',
+      '<div class="live-anomaly-title">',
+      '<span class="live-item-status ' + status + '">' + title + '</span>',
+      '<strong>' + list.length + ' 人</strong>',
+      '</div>',
+      '<div class="live-item-list">' + rows + '</div>',
+      '</div>'
+    ].join('');
+  }).join('');
+
+  container.innerHTML = html || '<div class="empty-hint">当前无异常人员</div>';
+}
+
+function renderDeptHealth() {
+  const container = document.getElementById('liveDeptBoard');
+  if (!container) {
+    return;
+  }
+  const topRows = (liveDeptStats || []).slice(0, 8);
+  if (topRows.length === 0) {
+    container.innerHTML = '<div class="empty-hint">暂无部门数据</div>';
+    return;
+  }
+
+  container.innerHTML = topRows.map((row) => {
+    const percent = Math.round(row.anomalyRate * 100);
+    return [
+      '<div class="live-dept-row">',
+      '<div class="live-dept-main">',
+      '<div class="live-dept-name">' + row.department + '</div>',
+      '<div class="live-dept-meta">异常 ' + row.anomaly + ' / 总数 ' + row.total + '</div>',
+      '</div>',
+      '<div class="live-dept-rate">' + percent + '%</div>',
+      '<div class="live-dept-bar"><span style="width:' + percent + '%"></span></div>',
+      '</div>'
+    ].join('');
+  }).join('');
+}
+
+function renderNormalSection(records) {
+  const section = document.getElementById('liveNormalSection');
+  const toggle = document.getElementById('liveToggleNormal');
+  const list = document.getElementById('liveNormalList');
+  if (!section || !toggle || !list) {
+    return;
+  }
+
+  if (liveViewMode !== 'watch') {
+    section.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  section.style.display = '';
+  const count = records.length;
+  toggle.textContent = (liveNormalExpanded ? '收起' : '展开') + '正常人员（' + count + '）';
+  list.classList.toggle('is-collapsed', !liveNormalExpanded);
+  if (!liveNormalExpanded) {
+    list.innerHTML = '';
+    return;
+  }
+  if (count === 0) {
+    list.innerHTML = '<div class="empty-hint">暂无正常人员</div>';
+    return;
+  }
+  list.innerHTML = records.map((record) => buildLiveItemRow(record, 'compact')).join('');
+}
+
+function renderVirtualPeopleWindow(records, viewport, windowNode) {
+  if (!viewport || !windowNode) {
+    return;
+  }
+  const buffer = 8;
+  const scrollTop = viewport.scrollTop;
+  const viewportHeight = Math.max(viewport.clientHeight || 0, 320);
+  const start = Math.max(0, Math.floor(scrollTop / liveVirtualRowHeight) - buffer);
+  const count = Math.ceil(viewportHeight / liveVirtualRowHeight) + buffer * 2;
+  const end = Math.min(records.length, start + count);
+
+  windowNode.style.transform = 'translateY(' + (start * liveVirtualRowHeight) + 'px)';
+  windowNode.innerHTML = records.slice(start, end).map((record) => buildPeopleTableRow(record)).join('');
+  rebuildLiveDomMap();
+}
+
+function renderPeopleTable(records) {
+  const section = document.getElementById('livePeopleSection');
+  const container = document.getElementById('livePeopleTable');
+  if (!section || !container) {
+    return;
+  }
+
+  if (liveViewMode !== 'investigate') {
+    section.style.display = 'none';
+    container.innerHTML = '';
+    liveVirtualState = { enabled: false, scrollTop: 0 };
+    return;
+  }
+
+  section.style.display = '';
+  const header = buildPeopleTableHeader();
+  if (!records || records.length === 0) {
+    container.classList.remove('is-virtual');
+    container.innerHTML = header + '<div class="empty-hint">当前筛选条件下暂无人员</div>';
+    liveVirtualState = { enabled: false, scrollTop: 0 };
+    return;
+  }
+
+  if (records.length <= liveVirtualThreshold) {
+    container.classList.remove('is-virtual');
+    container.innerHTML = header + '<div class="live-table-body">' + records.map((record) => buildPeopleTableRow(record)).join('') + '</div>';
+    liveVirtualState = { enabled: false, scrollTop: 0 };
+    return;
+  }
+
+  const rememberScroll = liveVirtualState && liveVirtualState.scrollTop ? liveVirtualState.scrollTop : 0;
+  const totalHeight = records.length * liveVirtualRowHeight;
+  container.classList.add('is-virtual');
+  container.innerHTML = [
+    header,
+    '<div class="live-virtual-viewport">',
+    '<div class="live-virtual-spacer" style="height:' + totalHeight + 'px"></div>',
+    '<div class="live-virtual-window"></div>',
+    '</div>'
+  ].join('');
+
+  const viewport = container.querySelector('.live-virtual-viewport');
+  const windowNode = container.querySelector('.live-virtual-window');
+  if (!viewport || !windowNode) {
+    return;
+  }
+
+  viewport.scrollTop = rememberScroll;
+  let renderToken = 0;
+  const renderWindow = () => {
+    renderVirtualPeopleWindow(records, viewport, windowNode);
+  };
+
+  viewport.addEventListener('scroll', () => {
+    liveVirtualState.scrollTop = viewport.scrollTop;
+    if (renderToken) {
+      cancelAnimationFrame(renderToken);
+    }
+    renderToken = requestAnimationFrame(() => {
+      renderToken = 0;
+      renderWindow();
+    });
+  });
+
+  liveVirtualState = { enabled: true, scrollTop: viewport.scrollTop };
+  renderWindow();
+}
+
+function renderLiveModeSwitch() {
+  const watchButton = document.getElementById('liveModeWatch');
+  const investigateButton = document.getElementById('liveModeInvestigate');
+  if (watchButton) {
+    watchButton.classList.toggle('is-active', liveViewMode === 'watch');
+  }
+  if (investigateButton) {
+    investigateButton.classList.toggle('is-active', liveViewMode === 'investigate');
+  }
+}
+
+function renderLiveFilterControls() {
+  const deptFilter = document.getElementById('liveDepartmentFilter');
+  const onlyAnomaly = document.getElementById('liveOnlyAnomaly');
+  const statusFilterWrap = document.getElementById('liveStatusFilters');
+  const searchInput = document.getElementById('liveSearch');
+
+  if (deptFilter) {
+    const current = liveFilters.department || '';
+    const allDepartments = Array.from(new Set(liveItems.map((item) => item.department || '未分配')))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+
+    const previousValue = deptFilter.value;
+    deptFilter.innerHTML = '';
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = '全部部门';
+    deptFilter.appendChild(allOption);
+    allDepartments.forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      deptFilter.appendChild(option);
+    });
+
+    const nextValue = allDepartments.includes(current) ? current : '';
+    deptFilter.value = nextValue;
+    if (previousValue && previousValue !== nextValue && current === previousValue) {
+      liveFilters.department = nextValue;
+    }
+  }
+
+  if (onlyAnomaly) {
+    onlyAnomaly.checked = !!liveFilters.onlyAnomaly;
+  }
+
+  if (statusFilterWrap) {
+    const selected = new Set(liveFilters.statuses || []);
+    statusFilterWrap.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.checked = selected.has(input.value);
+    });
+  }
+
+  if (searchInput && document.activeElement !== searchInput) {
+    const keyword = liveFilters.keyword || '';
+    if (searchInput.value !== keyword) {
+      searchInput.value = keyword;
+    }
+  }
+}
+
+function renderLiveDashboard() {
+  renderLiveModeSwitch();
+  renderLiveFilterControls();
+
+  liveSummary = computeLiveSummary(liveItems);
+  liveDeptStats = computeDeptStats(liveItems);
+  renderLiveSummaryBar();
+  renderDeptHealth();
+
+  const currentRecords = rankLiveItems(liveItems, liveFilters, liveViewMode);
+  const fullRecords = rankLiveItems(liveItems, { ...liveFilters, onlyAnomaly: false }, liveViewMode);
+  const anomalyRecords = currentRecords.filter((record) => record.isAnomaly);
+  const normalRecords = fullRecords.filter((record) => !record.isAnomaly);
+
+  renderAnomalyBoard(anomalyRecords);
+  renderNormalSection(normalRecords);
+  renderPeopleTable(currentRecords);
+
+  const empty = document.getElementById('liveEmpty');
+  if (empty) {
+    const hasData = liveItems.length > 0;
+    const hasVisible = liveViewMode === 'watch'
+      ? (anomalyRecords.length > 0 || normalRecords.length > 0)
+      : currentRecords.length > 0;
+    if (!hasData) {
+      empty.textContent = '暂无在线数据';
+      empty.style.display = 'block';
+    } else if (!hasVisible) {
+      empty.textContent = '当前筛选条件下暂无人员';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+    }
+  }
+
+  rebuildLiveDomMap();
+}
+
+function queueLiveRender() {
+  if (liveRenderQueued) {
+    return;
+  }
+  liveRenderQueued = true;
+  requestAnimationFrame(() => {
+    liveRenderQueued = false;
+    renderLiveDashboard();
+  });
+}
+
+function persistLiveState() {
+  localStorage.setItem(liveModeStorageKey, liveViewMode);
+  localStorage.setItem(liveOnlyAnomalyStorageKey, liveFilters.onlyAnomaly ? '1' : '0');
+}
+
+function setLiveMode(mode) {
+  const nextMode = mode === 'investigate' ? 'investigate' : 'watch';
+  if (nextMode === liveViewMode) {
+    return;
+  }
+  liveViewMode = nextMode;
+  if (liveViewMode === 'watch') {
+    liveFilters.onlyAnomaly = true;
+  } else {
+    liveFilters.onlyAnomaly = false;
+  }
+  liveNormalExpanded = false;
+  persistLiveState();
+  queueLiveRender();
 }
 
 function startLiveTimer() {
@@ -549,14 +1156,25 @@ function startLiveTimer() {
     clearInterval(liveTimer);
   }
   liveTimer = setInterval(() => {
+    let needReorder = false;
     liveItems.forEach((item) => {
-      item.delaySeconds = (item.delaySeconds || 0) + 1;
+      const beforeStatus = getLiveDisplay(item).statusCode;
+      item.delaySeconds = Number(item.delaySeconds || 0) + 1;
+      const afterStatus = getLiveDisplay(item).statusCode;
+      if (beforeStatus !== afterStatus) {
+        needReorder = true;
+      }
     });
-    document.querySelectorAll('.live-card').forEach((card) => {
-      const code = card.dataset.code;
-      const item = liveMap[code];
-      if (item) {
-        updateLiveCard(card, item);
+
+    if (needReorder) {
+      queueLiveRender();
+      return;
+    }
+
+    Object.keys(liveDomMap).forEach((code) => {
+      const current = liveMap[code];
+      if (current) {
+        patchLiveItem(current);
       }
     });
   }, 1000);
@@ -567,7 +1185,7 @@ async function loadLiveSnapshot() {
     const data = await fetchJSON('/api/v1/admin/live-snapshot');
     liveItems = Array.isArray(data) ? data : [];
     updateLiveMap(liveItems);
-    renderLiveGrid();
+    renderLiveDashboard();
     startLiveTimer();
   } catch (error) {
     connectionStatus.textContent = '连接异常';
@@ -575,15 +1193,51 @@ async function loadLiveSnapshot() {
 }
 
 function applyLiveUpdate(item) {
-  if (!item || !item.employeeCode) return;
-  const existing = liveMap[item.employeeCode];
-  if (existing) {
-    Object.assign(existing, item);
-  } else {
-    liveItems.push(item);
+  if (!item || !item.employeeCode) {
+    return;
   }
-  updateLiveMap(liveItems);
-  renderLiveGrid();
+
+  const code = item.employeeCode;
+  const existing = liveMap[code];
+  if (!existing) {
+    const nextItem = { ...item };
+    liveItems.push(nextItem);
+    liveMap[code] = nextItem;
+    queueLiveRender();
+    return;
+  }
+
+  const beforeDisplay = getLiveDisplay(existing);
+  const beforeStatus = beforeDisplay.statusCode;
+  const beforeDept = existing.department || '未分配';
+  const beforeName = existing.name || '';
+  const beforeText = buildLiveSearchText(existing, beforeDisplay);
+
+  Object.assign(existing, item);
+
+  const afterDisplay = getLiveDisplay(existing);
+  const afterStatus = afterDisplay.statusCode;
+  const afterDept = existing.department || '未分配';
+  const afterName = existing.name || '';
+  const afterText = buildLiveSearchText(existing, afterDisplay);
+
+  let needRerender = false;
+  if (beforeStatus !== afterStatus) {
+    needRerender = true;
+  }
+  if (beforeDept !== afterDept || beforeName !== afterName) {
+    needRerender = true;
+  }
+  if (!needRerender && liveFilters.keyword && beforeText !== afterText) {
+    needRerender = true;
+  }
+
+  if (needRerender) {
+    queueLiveRender();
+    return;
+  }
+
+  patchLiveItem(existing);
 }
 
 function connectLiveWS() {
@@ -613,7 +1267,7 @@ function connectLiveWS() {
       if (data.type === 'snapshot' && Array.isArray(data.items)) {
         liveItems = data.items;
         updateLiveMap(liveItems);
-        renderLiveGrid();
+        renderLiveDashboard();
         startLiveTimer();
         return;
       }
@@ -624,6 +1278,109 @@ function connectLiveWS() {
       return;
     }
   };
+}
+
+function bindLiveDashboardEvents() {
+  if (liveEventsBound) {
+    return;
+  }
+  liveEventsBound = true;
+
+  const refreshButton = document.getElementById('refreshLive');
+  if (refreshButton) {
+    refreshButton.addEventListener('click', loadLiveSnapshot);
+  }
+
+  const searchInput = document.getElementById('liveSearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', (event) => {
+      const keyword = (event.target.value || '').trim();
+      if (liveSearchTimer) {
+        clearTimeout(liveSearchTimer);
+      }
+      liveSearchTimer = setTimeout(() => {
+        liveFilters.keyword = keyword;
+        queueLiveRender();
+      }, 150);
+    });
+  }
+
+  const deptFilter = document.getElementById('liveDepartmentFilter');
+  if (deptFilter) {
+    deptFilter.addEventListener('change', (event) => {
+      liveFilters.department = event.target.value || '';
+      queueLiveRender();
+    });
+  }
+
+  const onlyAnomaly = document.getElementById('liveOnlyAnomaly');
+  if (onlyAnomaly) {
+    onlyAnomaly.addEventListener('change', (event) => {
+      liveFilters.onlyAnomaly = !!event.target.checked;
+      persistLiveState();
+      queueLiveRender();
+    });
+  }
+
+  const statusWrap = document.getElementById('liveStatusFilters');
+  if (statusWrap) {
+    statusWrap.addEventListener('change', () => {
+      const selected = [];
+      statusWrap.querySelectorAll('input[type="checkbox"]:checked').forEach((input) => {
+        selected.push(input.value);
+      });
+      liveFilters.statuses = selected;
+      queueLiveRender();
+    });
+  }
+
+  const modeSwitch = document.getElementById('liveModeSwitch');
+  if (modeSwitch) {
+    modeSwitch.addEventListener('click', (event) => {
+      const button = event.target.closest('.live-mode-btn');
+      if (!button) {
+        return;
+      }
+      setLiveMode(button.dataset.mode);
+    });
+  }
+
+  const toggleNormal = document.getElementById('liveToggleNormal');
+  if (toggleNormal) {
+    toggleNormal.addEventListener('click', () => {
+      liveNormalExpanded = !liveNormalExpanded;
+      queueLiveRender();
+    });
+  }
+
+  const summaryBar = document.getElementById('liveSummaryBar');
+  if (summaryBar) {
+    summaryBar.addEventListener('click', (event) => {
+      const chip = event.target.closest('[data-live-filter]');
+      if (!chip) {
+        return;
+      }
+      const type = chip.dataset.liveFilter;
+      if (type === 'all') {
+        liveFilters.statuses = [];
+        liveFilters.onlyAnomaly = liveViewMode === 'watch';
+      } else if (type === 'onduty') {
+        liveFilters.statuses = ['work', 'normal', 'break'];
+        liveFilters.onlyAnomaly = false;
+      } else if (type === 'anomaly') {
+        liveFilters.statuses = ['offline', 'fish', 'idle'];
+        liveFilters.onlyAnomaly = true;
+      } else if (liveAnomalyStatusSet.has(type)) {
+        liveFilters.statuses = [type];
+        liveFilters.onlyAnomaly = true;
+      }
+      persistLiveState();
+      queueLiveRender();
+    });
+  }
+
+  persistLiveState();
+  renderLiveDashboard();
 }
 function renderTable(container, headers, rows, colsClass) {
   if (!container) return;
@@ -2542,8 +3299,8 @@ document.getElementById('refreshRules').addEventListener('click', loadRules);
 document.getElementById('createRule').addEventListener('click', submitRule);
 document.getElementById('cancelRule').addEventListener('click', resetRuleForm);
 
-document.getElementById('refreshLive').addEventListener('click', loadLiveSnapshot);
-document.getElementById('liveSearch').addEventListener('input', renderLiveGrid);
+bindLiveDashboardEvents();
+
 
 document.getElementById('loadDailyReport').addEventListener('click', loadDailyReport);
 document.getElementById('exportDaily').addEventListener('click', exportDaily);

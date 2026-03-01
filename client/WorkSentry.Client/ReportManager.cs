@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -70,11 +71,15 @@ internal sealed class ReportManager
     private readonly ConfigStore _configStore;
     private readonly TokenStore _tokenStore;
     private readonly Logger _logger;
+    private readonly ClientErrorQueue _errorQueue;
     private ApiClient _apiClient;
     private readonly NetworkBackoff _backoff = new();
     private CancellationTokenSource? _cts;
     private SampleState? _lastSample;
     private DateTime _lastHeartbeatAt = DateTime.MinValue;
+    private DateTime _lastSuccessfulReportAtUtc = DateTime.MinValue;
+    private DateTime _lastErrorFlushAtUtc = DateTime.MinValue;
+    private DateTime _lastConnectivityErrorEnqueuedAtUtc = DateTime.MinValue;
     private string? _token;
     private string _optionalUpdateNotified = "";
     private bool _forceReport;
@@ -91,6 +96,7 @@ internal sealed class ReportManager
         _configStore = configStore;
         _tokenStore = tokenStore;
         _logger = logger;
+        _errorQueue = new ClientErrorQueue(_configStore.BaseDirectory);
         _apiClient = new ApiClient(_config.ServerUrl);
     }
 
@@ -98,12 +104,28 @@ internal sealed class ReportManager
     {
         _token = _tokenStore.LoadToken();
         await EnsureBoundAsync(CancellationToken.None).ConfigureAwait(false);
+        await FlushErrorQueueSafeAsync(CancellationToken.None).ConfigureAwait(false);
 
         var startupSample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
-        await SafeSendAsync(startupSample, "startup", CancellationToken.None).ConfigureAwait(false);
+        _ = await SafeSendAsync(startupSample, "startup", CancellationToken.None).ConfigureAwait(false);
 
         _cts = new CancellationTokenSource();
-        _ = Task.Run(() => LoopAsync(_cts.Token));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await LoopAsync(_cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+            {
+                // ignore
+            }
+            catch (Exception ex)
+            {
+                EnqueueClientError("report_loop_crashed", ex, null);
+                StatusChanged?.Invoke("上报异常");
+            }
+        });
     }
 
     public void Stop()
@@ -202,43 +224,86 @@ internal sealed class ReportManager
             return OperationResult<CheckoutTemplateResponse?>.Fail(fail.Error, fail.ErrorCode, fail.ErrorData, fail.FocusEmployeeCode);
         }
     }
-
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
-            if (_isBreaking)
+            try
             {
-                var breakSample = CreateBreakSample();
-                var shouldHeartbeatOnBreak = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
-                if (_forceReport || shouldHeartbeatOnBreak)
+                if (_isBreaking)
                 {
-                    _forceReport = false;
-                    await SafeSendAsync(breakSample, "break", ct).ConfigureAwait(false);
-                    _lastHeartbeatAt = DateTime.UtcNow;
+                    var breakSample = CreateBreakSample();
+                    var shouldHeartbeatOnBreak = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
+                    if (_forceReport || shouldHeartbeatOnBreak)
+                    {
+                        var result = await SafeSendAsync(breakSample, "break", ct).ConfigureAwait(false);
+                        if (result.Success)
+                        {
+                            _lastHeartbeatAt = DateTime.UtcNow;
+                            _forceReport = false;
+                        }
+                    }
+                    _lastSample = breakSample;
+                    continue;
                 }
-                _lastSample = breakSample;
-                continue;
+
+                SampleState sample;
+                try
+                {
+                    sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
+                }
+                catch (Exception ex)
+                {
+                    EnqueueClientError("capture_sample_failed", ex, null);
+                    _logger.Warn($"采样失败: {ex.Message}");
+                    sample = _lastSample ?? CreateBreakSample();
+                }
+
+                var shouldChange = _forceReport || IsChange(sample, _lastSample);
+                var shouldHeartbeat = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
+
+                if (shouldChange)
+                {
+                    var forced = _forceReport;
+                    var result = await SafeSendAsync(sample, "change", ct).ConfigureAwait(false);
+                    if (result.Success)
+                    {
+                        _lastHeartbeatAt = DateTime.UtcNow;
+                        _forceReport = false;
+                        _lastSample = sample;
+                    }
+                    else
+                    {
+                        if (forced)
+                        {
+                            _forceReport = true;
+                        }
+                    }
+                }
+                else if (shouldHeartbeat)
+                {
+                    var result = await SafeSendAsync(sample, "heartbeat", ct).ConfigureAwait(false);
+                    if (result.Success)
+                    {
+                        _lastHeartbeatAt = DateTime.UtcNow;
+                    }
+                    _lastSample = sample;
+                }
+                else
+                {
+                    _lastSample = sample;
+                }
             }
-
-            var sample = Win32Interop.CaptureSample(_config.IdleThresholdSeconds);
-            var shouldChange = _forceReport || IsChange(sample, _lastSample);
-            var shouldHeartbeat = DateTime.UtcNow - _lastHeartbeatAt >= TimeSpan.FromSeconds(_config.HeartbeatIntervalSeconds);
-
-            if (shouldChange)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                _forceReport = false;
-                await SafeSendAsync(sample, "change", ct).ConfigureAwait(false);
-                _lastHeartbeatAt = DateTime.UtcNow;
+                break;
             }
-            else if (shouldHeartbeat)
+            catch (Exception ex)
             {
-                await SafeSendAsync(sample, "heartbeat", ct).ConfigureAwait(false);
-                _lastHeartbeatAt = DateTime.UtcNow;
+                EnqueueClientError("loop_tick_exception", ex, null);
+                _logger.Error($"上报循环异常: {ex.Message}");
             }
-
-            _lastSample = sample;
         }
     }
 
@@ -295,9 +360,9 @@ internal sealed class ReportManager
         StatusChanged?.Invoke("已绑定");
     }
 
-    private async Task SafeSendAsync(SampleState sample, string reportType, CancellationToken ct)
+    private async Task<ReportResult> SafeSendAsync(SampleState sample, string reportType, CancellationToken ct)
     {
-        _ = await TrySendReportAsync(sample, reportType, ct, true, null, null).ConfigureAwait(false);
+        return await TrySendReportAsync(sample, reportType, ct, true, null, null).ConfigureAwait(false);
     }
 
     private async Task<ReportResult> TrySendReportAsync(SampleState sample, string reportType, CancellationToken ct, bool notifyStatus, ClientCheckoutPayload? checkout, string? reason)
@@ -313,6 +378,11 @@ internal sealed class ReportManager
             await EnsureBoundAsync(ct).ConfigureAwait(false);
             var response = await SendReportAsync(sample, reportType, ct, checkout, reason).ConfigureAwait(false);
             _backoff.RegisterSuccess();
+            _lastSuccessfulReportAtUtc = DateTime.UtcNow;
+            if (DateTime.UtcNow - _lastErrorFlushAtUtc >= TimeSpan.FromMinutes(1))
+            {
+                _ = FlushErrorQueueSafeAsync(ct);
+            }
             ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
             if (notifyStatus)
             {
@@ -331,6 +401,24 @@ internal sealed class ReportManager
         }
         catch (Exception ex)
         {
+            if (ex is ApiException || ex is HttpRequestException || ex is TaskCanceledException)
+            {
+                var lastSuccess = _lastSuccessfulReportAtUtc == DateTime.MinValue
+                    ? DateTime.UtcNow.AddYears(-1)
+                    : _lastSuccessfulReportAtUtc;
+                var thresholdSeconds = Math.Max(120, _config.OfflineThresholdSeconds);
+                if (DateTime.UtcNow - lastSuccess >= TimeSpan.FromSeconds(thresholdSeconds) &&
+                    DateTime.UtcNow - _lastConnectivityErrorEnqueuedAtUtc >= TimeSpan.FromMinutes(10))
+                {
+                    EnqueueClientError("report_connectivity_issue", ex, reportType);
+                    _lastConnectivityErrorEnqueuedAtUtc = DateTime.UtcNow;
+                }
+            }
+            else
+            {
+                EnqueueClientError("report_exception", ex, reportType);
+            }
+
             return HandleReportException(ex, true);
         }
     }
@@ -417,9 +505,73 @@ internal sealed class ReportManager
         }
     }
 
-    private void TriggerForcedUpdate()
+
+    private async Task FlushErrorQueueSafeAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_token))
+        {
+            return;
+        }
+
+        try
+        {
+            await _errorQueue.FlushAsync(_apiClient, _token!, _logger, ct).ConfigureAwait(false);
+            _lastErrorFlushAtUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"刷新错误上报队列失败: {ex.Message}");
+        }
+    }
+
+    private void EnqueueClientError(string errorType, Exception ex, string? reportType)
+    {
+        try
+        {
+            var context = new Dictionary<string, string>
+            {
+                ["serverUrl"] = _config.ServerUrl ?? string.Empty,
+                ["employeeCode"] = _config.EmployeeCode ?? string.Empty,
+                ["reportType"] = reportType ?? string.Empty,
+                ["lastSuccessfulReportAtUtc"] = _lastSuccessfulReportAtUtc == DateTime.MinValue ? string.Empty : _lastSuccessfulReportAtUtc.ToString("O"),
+            };
+
+            if (_lastSample != null)
+            {
+                context["lastProcessName"] = _lastSample.ProcessName ?? string.Empty;
+                context["lastWindowTitle"] = _lastSample.WindowTitle ?? string.Empty;
+                context["lastIdleSeconds"] = _lastSample.IdleSeconds.ToString();
+            }
+
+            _errorQueue.Enqueue(new ClientErrorReportRequest
+            {
+                OccurredAt = DateTime.UtcNow.ToString("O"),
+                ErrorType = errorType ?? string.Empty,
+                ExceptionType = ex.GetType().FullName ?? string.Empty,
+                Message = ex.Message ?? string.Empty,
+                StackTrace = ex.ToString(),
+                ClientVersion = AppConstants.ClientVersion,
+                Context = context
+            });
+        }
+        catch
+        {
+            // ignore
+        }
+    }    private void TriggerForcedUpdate()
     {
         ForcedUpdate?.Invoke(_config.LatestVersion, _config.UpdateUrl);
         Stop();
     }
 }
+
+
+
+
+
+
+
+
+
+
+

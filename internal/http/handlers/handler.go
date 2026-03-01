@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"worksentry/internal/config"
@@ -20,6 +21,16 @@ type Handler struct {
 	Queries *sqlc.Queries
 	Hub     *LiveHub
 	DB      *sql.DB
+
+	settingsMu       sync.RWMutex
+	settingsCache    sqlc.Setting
+	settingsCachedAt time.Time
+	settingsCacheOK  bool
+
+	rulesMu       sync.RWMutex
+	rulesCache    []sqlc.ListEnabledRulesRow
+	rulesCachedAt time.Time
+	rulesCacheOK  bool
 }
 
 func NewHandler(cfg *config.Config, db sqlc.DBTX) *Handler {

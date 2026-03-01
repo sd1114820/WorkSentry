@@ -80,6 +80,17 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.setSettingsCache(sqlc.Setting{
+		ID:                       1,
+		IdleThresholdSeconds:     payload.IdleThresholdSeconds,
+		HeartbeatIntervalSeconds: payload.HeartbeatIntervalSeconds,
+		OfflineThresholdSeconds:  payload.OfflineThresholdSeconds,
+		FishRatioWarnPercent:     payload.FishRatioWarnPercent,
+		UpdatePolicy:             int8(payload.UpdatePolicy),
+		LatestVersion:            toNullString(payload.LatestVersion),
+		UpdateUrl:                toNullString(payload.UpdateURL),
+	})
+
 	h.logAudit(r, "update_settings", "settings", sql.NullInt64{}, payload)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "保存成功"})
 }
@@ -101,11 +112,7 @@ func (h *Handler) getSettingsOrDefault(r *http.Request) sqlc.Setting {
 }
 
 func (h *Handler) getSettingsOrDefaultByContext(ctx context.Context) sqlc.Setting {
-	settings, err := h.Queries.GetSettings(ctx)
-	if err != nil {
-		return defaultSettings()
-	}
-	return settings
+	return h.getSettingsCached(ctx)
 }
 
 func defaultSettings() sqlc.Setting {
