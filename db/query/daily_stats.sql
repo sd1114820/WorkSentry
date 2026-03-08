@@ -37,3 +37,41 @@ LEFT JOIN departments d ON e.department_id = d.id
 WHERE ds.stat_date = ?
   AND (? = 0 OR e.department_id = ?)
 ORDER BY ds.attendance_seconds DESC;
+
+-- name: ListDailyStatsForExportByDate :many
+SELECT ds.stat_date,
+       e.employee_code,
+       e.name,
+       d.name AS department_name,
+       ds.work_seconds,
+       ds.normal_seconds,
+       ds.fish_seconds,
+       ds.idle_seconds,
+       ds.offline_seconds,
+       ds.attendance_seconds,
+       ds.effective_seconds,
+       ws_start.first_start_at,
+       ws_end.last_end_at
+FROM daily_stats ds
+JOIN employees e ON ds.employee_id = e.id
+LEFT JOIN departments d ON e.department_id = d.id
+LEFT JOIN (
+  SELECT employee_id,
+         MIN(start_at) AS first_start_at
+  FROM work_sessions
+  WHERE start_at >= ?
+    AND start_at < ?
+  GROUP BY employee_id
+) ws_start ON ws_start.employee_id = ds.employee_id
+LEFT JOIN (
+  SELECT employee_id,
+         MAX(end_at) AS last_end_at
+  FROM work_sessions
+  WHERE end_at IS NOT NULL
+    AND end_at >= ?
+    AND end_at < ?
+  GROUP BY employee_id
+) ws_end ON ws_end.employee_id = ds.employee_id
+WHERE ds.stat_date = ?
+  AND (? = 0 OR e.department_id = ?)
+ORDER BY ds.attendance_seconds DESC;

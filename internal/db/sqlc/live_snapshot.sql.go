@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const listLiveSnapshot = `-- name: ListLiveSnapshot :many
@@ -17,7 +18,8 @@ SELECT e.employee_code,
        e.last_status,
        e.last_description,
        e.last_seen_at,
-       CASE WHEN ws.active_start IS NULL THEN 0 ELSE 1 END AS is_working
+       CASE WHEN ws.active_start IS NULL THEN 0 ELSE 1 END AS is_working,
+       COALESCE(tp.has_today_punch, 0) AS has_today_punch
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 LEFT JOIN (
@@ -26,9 +28,22 @@ LEFT JOIN (
   WHERE end_at IS NULL
   GROUP BY employee_id
 ) ws ON ws.employee_id = e.id
+LEFT JOIN (
+  SELECT employee_id,
+         CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS has_today_punch
+  FROM work_sessions
+  WHERE (start_at >= ?1 AND start_at < ?2)
+     OR (end_at >= ?1 AND end_at < ?2)
+  GROUP BY employee_id
+) tp ON tp.employee_id = e.id
 WHERE e.enabled = 1
 ORDER BY e.id DESC
 `
+
+type ListLiveSnapshotParams struct {
+	DayStart time.Time `json:"day_start"`
+	DayEnd   time.Time `json:"day_end"`
+}
 
 type ListLiveSnapshotRow struct {
 	EmployeeCode    string                  `json:"employee_code"`
@@ -38,10 +53,11 @@ type ListLiveSnapshotRow struct {
 	LastDescription sql.NullString          `json:"last_description"`
 	LastSeenAt      sql.NullTime            `json:"last_seen_at"`
 	IsWorking       int64                   `json:"is_working"`
+	HasTodayPunch   int64                   `json:"has_today_punch"`
 }
 
-func (q *Queries) ListLiveSnapshot(ctx context.Context) ([]ListLiveSnapshotRow, error) {
-	rows, err := q.db.QueryContext(ctx, listLiveSnapshot)
+func (q *Queries) ListLiveSnapshot(ctx context.Context, arg ListLiveSnapshotParams) ([]ListLiveSnapshotRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveSnapshot, arg.DayStart, arg.DayEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +73,7 @@ func (q *Queries) ListLiveSnapshot(ctx context.Context) ([]ListLiveSnapshotRow, 
 			&i.LastDescription,
 			&i.LastSeenAt,
 			&i.IsWorking,
+			&i.HasTodayPunch,
 		); err != nil {
 			return nil, err
 		}

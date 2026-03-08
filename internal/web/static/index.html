@@ -4,7 +4,7 @@
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>WorkSentry 管理端</title>
-  <link rel='stylesheet' href='/assets/app.css?v=20260301-2' />
+  <link rel='stylesheet' href='/assets/app.css?v=20260305-1' />
 </head>
 <body>
   <div class='auth-modal' id='authModal'>
@@ -112,6 +112,10 @@
               <label class='inline compact'>
                 <input type='checkbox' id='liveOnlyAnomaly' />
                 <span>仅看异常</span>
+              </label>
+              <label class='inline compact'>
+                <input type='checkbox' id='liveOnlyTodayPunched' />
+                <span>仅看当日打卡</span>
               </label>
             </div>
             <div class='live-status-filters' id='liveStatusFilters'>
@@ -840,8 +844,13 @@
     </div>
   </div>
 
-  <script src='/assets/app.js?v=20260301-2'></script>
+  <script src='/assets/app.js?v=20260306-7'></script>
 </body>
 </html>
+
+
+
+
+
 
 

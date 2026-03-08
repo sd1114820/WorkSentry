@@ -47,6 +47,7 @@ type Querier interface {
 	GetToken(ctx context.Context, token string) (ClientToken, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	ListDailyStatsByDate(ctx context.Context, arg ListDailyStatsByDateParams) ([]ListDailyStatsByDateRow, error)
+	ListDailyStatsForExportByDate(ctx context.Context, arg ListDailyStatsForExportByDateParams) ([]ListDailyStatsForExportByDateRow, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
 	ListEmployees(ctx context.Context) ([]ListEmployeesRow, error)
 	ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminRow, error)
@@ -54,7 +55,7 @@ type Querier interface {
 	ListEmployeesForOfflineRefresh(ctx context.Context) ([]Employee, error)
 	ListEnabledRules(ctx context.Context) ([]ListEnabledRulesRow, error)
 	ListIncidents(ctx context.Context, arg ListIncidentsParams) ([]SystemIncident, error)
-	ListLiveSnapshot(ctx context.Context) ([]ListLiveSnapshotRow, error)
+	ListLiveSnapshot(ctx context.Context, arg ListLiveSnapshotParams) ([]ListLiveSnapshotRow, error)
 	ListManualAdjustments(ctx context.Context, arg ListManualAdjustmentsParams) ([]ListManualAdjustmentsRow, error)
 	ListOfflineSegmentsByDate(ctx context.Context, arg ListOfflineSegmentsByDateParams) ([]ListOfflineSegmentsByDateRow, error)
 	ListOfflineSegmentsByEmployeeAndRange(ctx context.Context, arg ListOfflineSegmentsByEmployeeAndRangeParams) ([]ListOfflineSegmentsByEmployeeAndRangeRow, error)
@@ -80,5 +81,3 @@ type Querier interface {
 }
 
 var _ Querier = (*Queries)(nil)
-
-

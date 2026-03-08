@@ -134,3 +134,113 @@ func (q *Queries) ListDailyStatsByDate(ctx context.Context, arg ListDailyStatsBy
 	}
 	return items, nil
 }
+
+const listDailyStatsForExportByDate = `-- name: ListDailyStatsForExportByDate :many
+SELECT ds.stat_date,
+       e.employee_code,
+       e.name,
+       d.name AS department_name,
+       ds.work_seconds,
+       ds.normal_seconds,
+       ds.fish_seconds,
+       ds.idle_seconds,
+       ds.offline_seconds,
+       ds.attendance_seconds,
+       ds.effective_seconds,
+       ws_start.first_start_at,
+       ws_end.last_end_at
+FROM daily_stats ds
+JOIN employees e ON ds.employee_id = e.id
+LEFT JOIN departments d ON e.department_id = d.id
+LEFT JOIN (
+  SELECT employee_id,
+         MIN(start_at) AS first_start_at
+  FROM work_sessions
+  WHERE start_at >= ?
+    AND start_at < ?
+  GROUP BY employee_id
+) ws_start ON ws_start.employee_id = ds.employee_id
+LEFT JOIN (
+  SELECT employee_id,
+         MAX(end_at) AS last_end_at
+  FROM work_sessions
+  WHERE end_at IS NOT NULL
+    AND end_at >= ?
+    AND end_at < ?
+  GROUP BY employee_id
+) ws_end ON ws_end.employee_id = ds.employee_id
+WHERE ds.stat_date = ?
+  AND (? = 0 OR e.department_id = ?)
+ORDER BY ds.attendance_seconds DESC
+`
+
+type ListDailyStatsForExportByDateParams struct {
+	WorkStartFrom time.Time     `json:"work_start_from"`
+	WorkStartTo   time.Time     `json:"work_start_to"`
+	WorkEndFrom   time.Time     `json:"work_end_from"`
+	WorkEndTo     time.Time     `json:"work_end_to"`
+	StatDate      time.Time     `json:"stat_date"`
+	Column6       interface{}   `json:"column_6"`
+	DepartmentID  sql.NullInt64 `json:"department_id"`
+}
+
+type ListDailyStatsForExportByDateRow struct {
+	StatDate          time.Time      `json:"stat_date"`
+	EmployeeCode      string         `json:"employee_code"`
+	Name              string         `json:"name"`
+	DepartmentName    sql.NullString `json:"department_name"`
+	WorkSeconds       int32          `json:"work_seconds"`
+	NormalSeconds     int32          `json:"normal_seconds"`
+	FishSeconds       int32          `json:"fish_seconds"`
+	IdleSeconds       int32          `json:"idle_seconds"`
+	OfflineSeconds    int32          `json:"offline_seconds"`
+	AttendanceSeconds int32          `json:"attendance_seconds"`
+	EffectiveSeconds  int32          `json:"effective_seconds"`
+	FirstStartAt      sql.NullTime   `json:"first_start_at"`
+	LastEndAt         sql.NullTime   `json:"last_end_at"`
+}
+
+func (q *Queries) ListDailyStatsForExportByDate(ctx context.Context, arg ListDailyStatsForExportByDateParams) ([]ListDailyStatsForExportByDateRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDailyStatsForExportByDate,
+		arg.WorkStartFrom,
+		arg.WorkStartTo,
+		arg.WorkEndFrom,
+		arg.WorkEndTo,
+		arg.StatDate,
+		arg.Column6,
+		arg.DepartmentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDailyStatsForExportByDateRow
+	for rows.Next() {
+		var i ListDailyStatsForExportByDateRow
+		if err := rows.Scan(
+			&i.StatDate,
+			&i.EmployeeCode,
+			&i.Name,
+			&i.DepartmentName,
+			&i.WorkSeconds,
+			&i.NormalSeconds,
+			&i.FishSeconds,
+			&i.IdleSeconds,
+			&i.OfflineSeconds,
+			&i.AttendanceSeconds,
+			&i.EffectiveSeconds,
+			&i.FirstStartAt,
+			&i.LastEndAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

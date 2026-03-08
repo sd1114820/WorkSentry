@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 	"time"
@@ -25,10 +26,16 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	departmentID, _ := strconv.ParseInt(r.URL.Query().Get("departmentId"), 10, 64)
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), sqlc.ListDailyStatsByDateParams{
-		StatDate:     date,
-		Column2:      departmentID,
-		DepartmentID: toNullInt64(departmentID),
+	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	rows, err := h.Queries.ListDailyStatsForExportByDate(r.Context(), sqlc.ListDailyStatsForExportByDateParams{
+		WorkStartFrom: dayStart,
+		WorkStartTo:   dayEnd,
+		WorkEndFrom:   dayStart,
+		WorkEndTo:     dayEnd,
+		StatDate:      date,
+		Column6:       departmentID,
+		DepartmentID:  toNullInt64(departmentID),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "导出失败")
@@ -39,7 +46,7 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 	sheet := "日报表"
 	file.SetSheetName("Sheet1", sheet)
 
-	headers := []string{"日期", "工号", "姓名", "部门", "工作时长", "常规时长", "摸鱼时长", "离开时长", "离线时长", "在岗时长", "有效工时"}
+	headers := []string{"日期", "工号", "姓名", "部门", "上班打卡时间", "下班打卡时间", "工作时长", "常规时长", "摸鱼时长", "离开时长", "离线时长", "在岗时长", "有效工时"}
 	for col, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(col+1, 1)
 		_ = file.SetCellValue(sheet, cell, header)
@@ -52,6 +59,8 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 			row.EmployeeCode,
 			row.Name,
 			nullString(row.DepartmentName),
+			formatPunchHHmmOrMissing(row.FirstStartAt),
+			formatPunchHHmmOrMissing(row.LastEndAt),
 			formatDuration(int64(row.WorkSeconds)),
 			formatDuration(int64(row.NormalSeconds)),
 			formatDuration(int64(row.FishSeconds)),
@@ -66,9 +75,16 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	file.SetColWidth(sheet, "A", "K", 16)
+	file.SetColWidth(sheet, "A", "M", 16)
 
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=worksentry_daily.xlsx")
 	_ = file.Write(w)
+}
+
+func formatPunchHHmmOrMissing(value sql.NullTime) string {
+	if !value.Valid {
+		return "未打卡"
+	}
+	return value.Time.In(time.Local).Format("15:04")
 }

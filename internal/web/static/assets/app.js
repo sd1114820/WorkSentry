@@ -48,6 +48,7 @@ let liveFilters = {
   department: '',
   keyword: '',
   onlyAnomaly: savedOnlyAnomaly === null ? liveViewMode === 'watch' : savedOnlyAnomaly === '1',
+  onlyTodayPunched: false,
 };
 let liveSummary = null;
 let liveDeptStats = [];
@@ -62,6 +63,7 @@ let editingAdminUserId = null;
 
 let departments = [];
 let employees = [];
+let employeeDepartmentMap = {};
 let adminUsersCache = [];
 let rulesCache = [];
 let adjustmentsCache = [];
@@ -83,6 +85,17 @@ let editingCheckoutFieldId = null;
 let activeCheckoutTemplateId = null;
 const employeeSearchReady = {};
 
+const departmentSelectSearchConfigs = {
+  liveDepartmentFilter: { placeholder: '搜索部门（全部）', emptyLabel: '全部部门' },
+  reportDepartment: { placeholder: '搜索部门（全部）', emptyLabel: '全部' },
+  attendanceDepartment: { placeholder: '搜索部门', emptyLabel: '请选择部门' },
+  reviewDepartment: { placeholder: '搜索部门（全部）', emptyLabel: '全部' },
+  deptParent: { placeholder: '搜索部门（无）', emptyLabel: '无' },
+  employeeDepartment: { placeholder: '搜索部门（未分配）', emptyLabel: '未分配' },
+  checkoutDepartment: { placeholder: '搜索部门', emptyLabel: '请选择部门' },
+  checkoutQueryDepartment: { placeholder: '搜索部门（全部）', emptyLabel: '全部' },
+};
+const departmentSelectSearchState = {};
 
 function switchSection(target) {
   navItems.forEach((item) => {
@@ -494,6 +507,65 @@ function updateLiveMap(items) {
   });
 }
 
+function updateEmployeeDepartmentMap(items) {
+  employeeDepartmentMap = {};
+  (items || []).forEach((item) => {
+    if (!item || !item.employeeCode) {
+      return;
+    }
+    employeeDepartmentMap[item.employeeCode] = item.department || '';
+  });
+}
+
+function getLiveDepartmentName(item) {
+  if (item && item.department) {
+    return item.department;
+  }
+  if (item && item.employeeCode && employeeDepartmentMap[item.employeeCode]) {
+    return employeeDepartmentMap[item.employeeCode];
+  }
+  return '未分配';
+}
+
+function getLiveDepartmentOptions() {
+  const values = [];
+  const seen = new Set();
+  const pushName = (name) => {
+    const nextName = String(name || '').trim();
+    if (!nextName || seen.has(nextName)) {
+      return;
+    }
+    seen.add(nextName);
+    values.push(nextName);
+  };
+
+  departments.forEach((dept) => {
+    if (!dept) {
+      return;
+    }
+    pushName(dept.name);
+  });
+
+  liveItems.forEach((item) => {
+    const name = getLiveDepartmentName(item);
+    if (name !== '未分配') {
+      pushName(name);
+    }
+  });
+
+  pushName('未分配');
+
+  return values.sort((a, b) => {
+    if (a === '未分配') {
+      return 1;
+    }
+    if (b === '未分配') {
+      return -1;
+    }
+    return a.localeCompare(b, 'zh-CN');
+  });
+}
+
 function getLiveStatusLabel(statusCode, fallbackLabel) {
   if (liveStatusLabels[statusCode]) {
     return liveStatusLabels[statusCode];
@@ -570,7 +642,7 @@ function computeLiveSummary(items) {
 function computeDeptStats(items) {
   const deptMap = {};
   items.forEach((item) => {
-    const deptName = item.department || '未分配';
+    const deptName = getLiveDepartmentName(item);
     if (!deptMap[deptName]) {
       deptMap[deptName] = {
         department: deptName,
@@ -615,7 +687,7 @@ function buildLiveSearchText(item, display) {
   return [
     item.employeeCode || '',
     item.name || '',
-    item.department || '',
+    getLiveDepartmentName(item),
     item.description || '',
     display.statusLabel || '',
   ].join(' ').toLowerCase();
@@ -627,6 +699,7 @@ function rankLiveItems(items, filters, mode) {
   const keyword = (activeFilters.keyword || '').trim().toLowerCase();
   const department = (activeFilters.department || '').trim();
   const onlyAnomaly = !!activeFilters.onlyAnomaly;
+  const onlyTodayPunched = !!activeFilters.onlyTodayPunched;
 
   const ranked = [];
   items.forEach((item) => {
@@ -637,10 +710,13 @@ function rankLiveItems(items, filters, mode) {
     if (onlyAnomaly && !isAnomaly) {
       return;
     }
+    if (onlyTodayPunched && !item.hasTodayPunch) {
+      return;
+    }
     if (statusFilter.size > 0 && !statusFilter.has(statusCode)) {
       return;
     }
-    if (department && (item.department || '未分配') !== department) {
+    if (department && getLiveDepartmentName(item) !== department) {
       return;
     }
     if (keyword) {
@@ -670,8 +746,8 @@ function rankLiveItems(items, filters, mode) {
     if (b.delaySeconds !== a.delaySeconds) {
       return b.delaySeconds - a.delaySeconds;
     }
-    const deptA = a.item.department || '';
-    const deptB = b.item.department || '';
+    const deptA = getLiveDepartmentName(a.item);
+    const deptB = getLiveDepartmentName(b.item);
     const deptCompare = deptA.localeCompare(deptB, 'zh-CN');
     if (deptCompare !== 0) {
       return deptCompare;
@@ -717,7 +793,7 @@ function buildLiveItemRow(record, extraClass) {
     '</div>',
     '</div>',
     '<div class="live-item-sub">',
-    '<span class="live-item-dept">' + (item.department || '未分配') + '</span>',
+    '<span class="live-item-dept">' + getLiveDepartmentName(item) + '</span>',
     '<span class="live-item-last">上次：' + (item.lastSeen || '-') + '</span>',
     '<span class="live-item-desc">' + (item.description || '无活动') + '</span>',
     '</div>',
@@ -746,7 +822,7 @@ function buildPeopleTableRow(record) {
     '<div class="live-item-name">' + item.name + '（' + item.employeeCode + '）</div>',
     '<div><span class="live-item-status ' + display.statusCode + '">' + display.statusLabel + '</span></div>',
     '<div class="live-item-delay">' + getLiveDelayText(display) + '</div>',
-    '<div class="live-item-dept">' + (item.department || '未分配') + '</div>',
+    '<div class="live-item-dept">' + getLiveDepartmentName(item) + '</div>',
     '<div class="live-item-last">上次：' + (item.lastSeen || '-') + '</div>',
     '<div class="live-item-desc">' + (item.description || '无活动') + '</div>',
     '</div>'
@@ -789,7 +865,7 @@ function patchLiveRefs(refs, item) {
     refs.delay.textContent = getLiveDelayText(display);
   }
   if (refs.dept) {
-    refs.dept.textContent = item.department || '未分配';
+    refs.dept.textContent = getLiveDepartmentName(item);
   }
   if (refs.last) {
     refs.last.textContent = '上次：' + (item.lastSeen || '-');
@@ -1034,13 +1110,13 @@ function renderLiveModeSwitch() {
 function renderLiveFilterControls() {
   const deptFilter = document.getElementById('liveDepartmentFilter');
   const onlyAnomaly = document.getElementById('liveOnlyAnomaly');
+  const onlyTodayPunched = document.getElementById('liveOnlyTodayPunched');
   const statusFilterWrap = document.getElementById('liveStatusFilters');
   const searchInput = document.getElementById('liveSearch');
 
   if (deptFilter) {
     const current = liveFilters.department || '';
-    const allDepartments = Array.from(new Set(liveItems.map((item) => item.department || '未分配')))
-      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const allDepartments = getLiveDepartmentOptions();
 
     const previousValue = deptFilter.value;
     deptFilter.innerHTML = '';
@@ -1060,10 +1136,15 @@ function renderLiveFilterControls() {
     if (previousValue && previousValue !== nextValue && current === previousValue) {
       liveFilters.department = nextValue;
     }
+    refreshDepartmentSelectSearch('liveDepartmentFilter');
   }
 
   if (onlyAnomaly) {
     onlyAnomaly.checked = !!liveFilters.onlyAnomaly;
+  }
+
+  if (onlyTodayPunched) {
+    onlyTodayPunched.checked = !!liveFilters.onlyTodayPunched;
   }
 
   if (statusFilterWrap) {
@@ -1209,17 +1290,22 @@ function applyLiveUpdate(item) {
 
   const beforeDisplay = getLiveDisplay(existing);
   const beforeStatus = beforeDisplay.statusCode;
-  const beforeDept = existing.department || '未分配';
+  const beforeDept = getLiveDepartmentName(existing);
   const beforeName = existing.name || '';
   const beforeText = buildLiveSearchText(existing, beforeDisplay);
+  const beforeHasTodayPunch = !!existing.hasTodayPunch;
 
+  if ((item.department || '') === '' && existing.department) {
+    item = { ...item, department: existing.department };
+  }
   Object.assign(existing, item);
 
   const afterDisplay = getLiveDisplay(existing);
   const afterStatus = afterDisplay.statusCode;
-  const afterDept = existing.department || '未分配';
+  const afterDept = getLiveDepartmentName(existing);
   const afterName = existing.name || '';
   const afterText = buildLiveSearchText(existing, afterDisplay);
+  const afterHasTodayPunch = !!existing.hasTodayPunch;
 
   let needRerender = false;
   if (beforeStatus !== afterStatus) {
@@ -1229,6 +1315,9 @@ function applyLiveUpdate(item) {
     needRerender = true;
   }
   if (!needRerender && liveFilters.keyword && beforeText !== afterText) {
+    needRerender = true;
+  }
+  if (!needRerender && liveFilters.onlyTodayPunched && beforeHasTodayPunch !== afterHasTodayPunch) {
     needRerender = true;
   }
 
@@ -1318,6 +1407,14 @@ function bindLiveDashboardEvents() {
     onlyAnomaly.addEventListener('change', (event) => {
       liveFilters.onlyAnomaly = !!event.target.checked;
       persistLiveState();
+      queueLiveRender();
+    });
+  }
+
+  const onlyTodayPunched = document.getElementById('liveOnlyTodayPunched');
+  if (onlyTodayPunched) {
+    onlyTodayPunched.addEventListener('change', (event) => {
+      liveFilters.onlyTodayPunched = !!event.target.checked;
       queueLiveRender();
     });
   }
@@ -1967,6 +2064,20 @@ function renderDepartmentOptions() {
   if (checkoutQuerySelect) {
     checkoutQuerySelect.innerHTML = '<option value="0">全部</option>' + options;
   }
+  ['deptParent', 'reportDepartment', 'employeeDepartment', 'attendanceDepartment', 'reviewDepartment', 'checkoutDepartment', 'checkoutQueryDepartment'].forEach((selectId) => {
+    refreshDepartmentSelectSearch(selectId);
+  });
+}
+
+function scrollEditCardToTop(targetEl) {
+  if (!targetEl || typeof targetEl.closest !== 'function') {
+    return;
+  }
+  const card = targetEl.closest('.card');
+  if (!card) {
+    return;
+  }
+  card.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
 }
 
 function resetDepartmentForm() {
@@ -1981,6 +2092,7 @@ function fillDepartmentForm(item) {
   document.getElementById('deptName').value = item.name;
   document.getElementById('deptParent').value = String(item.parentId || 0);
   document.getElementById('saveDepartment').textContent = '更新部门';
+  scrollEditCardToTop(document.getElementById('deptName'));
 }
 
 async function saveDepartment() {
@@ -2037,6 +2149,7 @@ async function loadEmployees() {
   try {
     const items = await fetchJSON('/api/v1/admin/employees');
     employees = Array.isArray(items) ? items : [];
+    updateEmployeeDepartmentMap(employees);
     renderEmployeeOptions();
     renderEmployeesTable(employees);
     initEmployeeSearches();
@@ -2109,6 +2222,7 @@ function fillEmployeeForm(item) {
   document.getElementById('employeeDepartment').value = String(item.departmentId || 0);
   document.getElementById('employeeEnabled').checked = !!item.enabled;
   document.getElementById('saveEmployee').textContent = '更新员工';
+  scrollEditCardToTop(document.getElementById('employeeCode'));
 }
 
 async function saveEmployee() {
@@ -2367,6 +2481,191 @@ function setDurationInputs(hoursId, minutesId, seconds) {
   document.getElementById(minutesId).value = minutes ? String(minutes) : '';
 }
 
+function normalizeKeyword(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function collectDepartmentOptions(selectEl) {
+  if (!selectEl) {
+    return [];
+  }
+  return Array.from(selectEl.options || []).map((option) => ({
+    value: option.value,
+    label: option.textContent || '',
+    selected: option.selected,
+  }));
+}
+
+function filterDepartmentOptions(options, keyword) {
+  const value = normalizeKeyword(keyword);
+  if (!value) {
+    return options;
+  }
+  return (options || []).filter((item) => normalizeKeyword(item.label).includes(value));
+}
+
+function syncDepartmentSelectValue(selectEl, value, dispatchChange) {
+  if (!selectEl) {
+    return;
+  }
+  const nextValue = String(value === undefined || value === null ? '' : value);
+  const hasOption = Array.from(selectEl.options || []).some((option) => option.value === nextValue);
+  if (!hasOption) {
+    return;
+  }
+  const changed = selectEl.value !== nextValue;
+  selectEl.value = nextValue;
+  if (dispatchChange && changed) {
+    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
+
+function renderDepartmentSearchPanel(state, keywordOverride) {
+  if (!state || !state.panel || !state.selectEl) {
+    return;
+  }
+  const options = collectDepartmentOptions(state.selectEl);
+  const keyword = keywordOverride === undefined ? (state.keyword || '') : keywordOverride;
+  const filtered = filterDepartmentOptions(options, keyword);
+  state.panel.innerHTML = '';
+
+  if (!filtered || filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'dept-search-empty';
+    empty.textContent = '未找到匹配部门';
+    state.panel.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach((item) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'dept-search-item';
+    option.dataset.value = item.value;
+    option.textContent = item.label;
+    if (state.selectEl.value === item.value) {
+      option.classList.add('is-active');
+    }
+    state.panel.appendChild(option);
+  });
+}
+
+function refreshDepartmentSelectSearch(selectId) {
+  const state = departmentSelectSearchState[selectId];
+  if (!state || !state.selectEl || !state.input) {
+    return;
+  }
+  const selectedOption = state.selectEl.options[state.selectEl.selectedIndex] || null;
+  if (document.activeElement !== state.input) {
+    state.keyword = '';
+    if (selectedOption) {
+      state.input.value = selectedOption.textContent || '';
+    } else {
+      state.input.value = state.emptyLabel || '';
+    }
+  }
+  if (state.panel.classList.contains('is-open')) {
+    renderDepartmentSearchPanel(state);
+  }
+}
+
+function initDepartmentSelectSearch(selectId, config) {
+  if (departmentSelectSearchState[selectId]) {
+    return;
+  }
+  const selectEl = document.getElementById(selectId);
+  if (!selectEl) {
+    return;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'dept-search-select';
+  wrapper.dataset.selectId = selectId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'search-input dept-search-input';
+  input.placeholder = (config && config.placeholder) || '搜索部门';
+  input.autocomplete = 'off';
+
+  const panel = document.createElement('div');
+  panel.className = 'dept-search-panel';
+
+  wrapper.appendChild(input);
+  wrapper.appendChild(panel);
+  selectEl.insertAdjacentElement('afterend', wrapper);
+  selectEl.classList.add('dept-search-native');
+
+  const state = {
+    selectEl: selectEl,
+    wrapper: wrapper,
+    input: input,
+    panel: panel,
+    emptyLabel: config && config.emptyLabel ? config.emptyLabel : '全部',
+    keyword: '',
+  };
+  departmentSelectSearchState[selectId] = state;
+
+  const openPanel = () => {
+    panel.classList.add('is-open');
+    renderDepartmentSearchPanel(state);
+  };
+
+  const closePanel = () => {
+    panel.classList.remove('is-open');
+    state.keyword = '';
+  };
+
+  input.addEventListener('focus', () => {
+    state.keyword = '';
+    openPanel();
+  });
+
+  input.addEventListener('click', () => {
+    state.keyword = '';
+    openPanel();
+  });
+
+  input.addEventListener('input', () => {
+    state.keyword = input.value || '';
+    openPanel();
+  });
+
+  panel.addEventListener('mousedown', (event) => {
+    const option = event.target.closest('.dept-search-item');
+    if (!option) {
+      return;
+    }
+    const value = option.dataset.value;
+    syncDepartmentSelectValue(selectEl, value, true);
+    state.keyword = '';
+    if (state.input) {
+      state.input.value = option.textContent || '';
+    }
+    refreshDepartmentSelectSearch(selectId);
+    closePanel();
+    event.preventDefault();
+  });
+
+  selectEl.addEventListener('change', () => {
+    refreshDepartmentSelectSearch(selectId);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!wrapper.contains(event.target)) {
+      closePanel();
+    }
+  });
+
+  refreshDepartmentSelectSearch(selectId);
+}
+
+function initDepartmentSelectSearches() {
+  Object.keys(departmentSelectSearchConfigs).forEach((selectId) => {
+    initDepartmentSelectSearch(selectId, departmentSelectSearchConfigs[selectId]);
+    refreshDepartmentSelectSearch(selectId);
+  });
+}
 function renderEmployeeSearchOptions(panel, keyword) {
   if (!panel) return;
   const value = (keyword || '').trim().toLowerCase();
@@ -3299,6 +3598,7 @@ document.getElementById('refreshRules').addEventListener('click', loadRules);
 document.getElementById('createRule').addEventListener('click', submitRule);
 document.getElementById('cancelRule').addEventListener('click', resetRuleForm);
 
+initDepartmentSelectSearches();
 bindLiveDashboardEvents();
 
 
@@ -3581,4 +3881,18 @@ if (authToken) {
 } else {
   showLogin();
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
