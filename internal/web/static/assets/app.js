@@ -1547,6 +1547,21 @@ async function exportDaily() {
   }
 }
 
+async function exportEmployees() {
+  try {
+    const blob = await fetchBlob('/api/v1/admin/exports/employees.xlsx');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = '员工台账.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    setStatus(error.message, document.getElementById('employeeStatus'));
+  }
+}
+
 async function loadTimeline() {
   const hidden = document.getElementById('timelineEmployee').value;
   const typed = document.getElementById('timelineEmployeeSearch').value;
@@ -3604,6 +3619,10 @@ bindLiveDashboardEvents();
 
 document.getElementById('loadDailyReport').addEventListener('click', loadDailyReport);
 document.getElementById('exportDaily').addEventListener('click', exportDaily);
+const exportEmployeesBtn = document.getElementById('exportEmployees');
+if (exportEmployeesBtn) {
+  exportEmployeesBtn.addEventListener('click', exportEmployees);
+}
 document.getElementById('loadTimeline').addEventListener('click', loadTimeline);
 
 const timelineTable = document.getElementById('timelineTable');
@@ -3881,6 +3900,7 @@ if (authToken) {
 } else {
   showLogin();
 }
+
 
 
 

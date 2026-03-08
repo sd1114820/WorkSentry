@@ -35,6 +35,7 @@ func NewRouter(h *handlers.Handler) http.Handler {
 	mux.HandleFunc("/api/v1/admin/work-session-reviews", adminOnly(h.WorkSessionReviews))
 	mux.HandleFunc("/api/v1/admin/work-session-review", adminOnly(h.WorkSessionReviewDetail))
 	mux.HandleFunc("/api/v1/admin/exports/daily.xlsx", adminOnly(h.ExportDaily))
+	mux.HandleFunc("/api/v1/admin/exports/employees.xlsx", adminOnly(h.ExportEmployees))
 	mux.HandleFunc("/api/v1/admin/manual-adjustments", adminOnly(h.ManualAdjustments))
 	mux.HandleFunc("/api/v1/admin/offline-segments", adminOnly(h.OfflineSegments))
 	mux.HandleFunc("/api/v1/admin/system-incidents", adminOnly(h.SystemIncidents))
@@ -55,5 +56,3 @@ func NewRouter(h *handlers.Handler) http.Handler {
 
 	return h.WithLogging(mux)
 }
-
-
