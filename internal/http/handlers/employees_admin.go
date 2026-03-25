@@ -110,12 +110,14 @@ func (h *Handler) listEmployees(w http.ResponseWriter, r *http.Request) {
 				lastSeen = formatTime(item.LastSeenAt.Time)
 			}
 			lastClockIn := ""
-			if item.LastStartAt.Valid {
-				lastClockIn = formatTime(item.LastStartAt.Time)
+			lastStartAt := interfaceToNullTime(item.LastStartAt)
+			if lastStartAt.Valid {
+				lastClockIn = formatTime(lastStartAt.Time)
 			}
 			lastClockOut := ""
-			if item.LastEndAt.Valid {
-				lastClockOut = formatTime(item.LastEndAt.Time)
+			lastEndAt := interfaceToNullTime(item.LastEndAt)
+			if lastEndAt.Valid {
+				lastClockOut = formatTime(lastEndAt.Time)
 			}
 			bindStatus := "未绑定"
 			if item.FingerprintHash.Valid {
@@ -160,12 +162,14 @@ func (h *Handler) listEmployees(w http.ResponseWriter, r *http.Request) {
 			lastSeen = formatTime(item.LastSeenAt.Time)
 		}
 		lastClockIn := ""
-		if item.LastStartAt.Valid {
-			lastClockIn = formatTime(item.LastStartAt.Time)
+		lastStartAt := interfaceToNullTime(item.LastStartAt)
+		if lastStartAt.Valid {
+			lastClockIn = formatTime(lastStartAt.Time)
 		}
 		lastClockOut := ""
-		if item.LastEndAt.Valid {
-			lastClockOut = formatTime(item.LastEndAt.Time)
+		lastEndAt := interfaceToNullTime(item.LastEndAt)
+		if lastEndAt.Valid {
+			lastClockOut = formatTime(lastEndAt.Time)
 		}
 		bindStatus := "未绑定"
 		if item.FingerprintHash.Valid {

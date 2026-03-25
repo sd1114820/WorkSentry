@@ -14,6 +14,7 @@ type DailyReportView struct {
 	EmployeeCode       string `json:"employeeCode"`
 	Name               string `json:"name"`
 	Department         string `json:"department"`
+	OnDutyDuration     string `json:"onDutyDuration"`
 	WorkDuration       string `json:"workDuration"`
 	NormalDuration     string `json:"normalDuration"`
 	FishDuration       string `json:"fishDuration"`
@@ -71,11 +72,7 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), sqlc.ListDailyStatsByDateParams{
-		StatDate:     date,
-		Column2:      departmentID,
-		DepartmentID: toNullInt64(departmentID),
-	})
+	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, departmentID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取报表失败")
 		return
@@ -83,14 +80,24 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]DailyReportView, 0, len(rows))
 	for _, row := range rows {
+		metrics := buildDailyReportMetrics(
+			int64(row.NormalSeconds),
+			int64(row.FishSeconds),
+			int64(row.IdleSeconds),
+			int64(row.OfflineSeconds),
+			int64(row.EffectiveSeconds),
+			row.BreakSeconds,
+			row.OnDutySeconds,
+		)
 		items = append(items, DailyReportView{
 			EmployeeCode:       row.EmployeeCode,
 			Name:               row.Name,
 			Department:         nullString(row.DepartmentName),
-			WorkDuration:       formatDuration(int64(row.WorkSeconds)),
+			OnDutyDuration:     formatDuration(metrics.OnDutySeconds),
+			WorkDuration:       formatDuration(metrics.WorkSeconds),
 			NormalDuration:     formatDuration(int64(row.NormalSeconds)),
 			FishDuration:       formatDuration(int64(row.FishSeconds)),
-			IdleDuration:       formatDuration(int64(row.IdleSeconds)),
+			IdleDuration:       formatDuration(metrics.IdleSeconds),
 			OfflineDuration:    formatDuration(int64(row.OfflineSeconds)),
 			AttendanceDuration: formatDuration(int64(row.AttendanceSeconds)),
 			EffectiveDuration:  formatDuration(int64(row.EffectiveSeconds)),
@@ -173,11 +180,7 @@ func (h *Handler) ReportRank(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), sqlc.ListDailyStatsByDateParams{
-		StatDate:     date,
-		Column2:      int64(0),
-		DepartmentID: toNullInt64(0),
-	})
+	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, 0))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取排行失败")
 		return

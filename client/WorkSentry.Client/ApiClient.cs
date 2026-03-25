@@ -32,6 +32,7 @@ internal sealed class ApiClient
     {
         return PostAsync<ClientReportResponse>("/api/v1/client/report", request, token, ct);
     }
+
     public Task<ClientErrorReportResponse> ReportErrorAsync(ClientErrorReportRequest request, string token, CancellationToken ct)
     {
         return PostAsync<ClientErrorReportResponse>("/api/v1/client/error", request, token, ct);
@@ -51,14 +52,19 @@ internal sealed class ApiClient
         }
 
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
-            var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败", "invalid_response");
+            return JsonSerializer.Deserialize<T>(payload, _options)
+                ?? throw CreateApiException(response, new ApiErrorResponse
+                {
+                    Message = "响应解析失败",
+                    Code = "invalid_response"
+                }, payload);
         }
 
-        var error = await ReadErrorResponseAsync(response, ct).ConfigureAwait(false);
-        throw CreateApiException(response.StatusCode, error);
+        var error = ReadErrorResponse(response.StatusCode, payload);
+        throw CreateApiException(response, error, payload);
     }
 
     private async Task<T> PostAsync<T>(string path, object body, string? token, CancellationToken ct)
@@ -74,62 +80,73 @@ internal sealed class ApiClient
         }
 
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
-            var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(payload, _options) ?? throw new ApiException(response.StatusCode, "响应解析失败", "invalid_response");
+            return JsonSerializer.Deserialize<T>(payload, _options)
+                ?? throw CreateApiException(response, new ApiErrorResponse
+                {
+                    Message = "响应解析失败",
+                    Code = "invalid_response"
+                }, payload);
         }
 
-        var error = await ReadErrorResponseAsync(response, ct).ConfigureAwait(false);
-        throw CreateApiException(response.StatusCode, error);
+        var error = ReadErrorResponse(response.StatusCode, payload);
+        throw CreateApiException(response, error, payload);
     }
 
-    private Exception CreateApiException(HttpStatusCode statusCode, ApiErrorResponse error)
+    private Exception CreateApiException(HttpResponseMessage response, ApiErrorResponse error, string? rawResponseBody)
     {
         var message = !string.IsNullOrWhiteSpace(error.Message)
             ? error.Message
-            : $"请求失败: {(int)statusCode}";
+            : $"请求失败: {(int)response.StatusCode}";
         var code = string.IsNullOrWhiteSpace(error.Code) ? null : error.Code;
+        var requestUri = response.RequestMessage?.RequestUri?.ToString();
+        var requestMethod = response.RequestMessage?.Method.Method;
+        var reasonPhrase = response.ReasonPhrase;
 
         if (string.Equals(code, "need_reason", StringComparison.OrdinalIgnoreCase))
         {
-            return new NeedReasonException(statusCode, message, error.Data);
+            return new NeedReasonException(response.StatusCode, message, error.Data, requestUri, requestMethod, reasonPhrase, rawResponseBody);
         }
 
-        if (statusCode == HttpStatusCode.Unauthorized)
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            return new UnauthorizedException(message, code, error.Data);
+            return new UnauthorizedException(message, code, error.Data, requestUri, requestMethod, reasonPhrase, rawResponseBody);
         }
-        if (statusCode == HttpStatusCode.Forbidden)
+        if (response.StatusCode == HttpStatusCode.Forbidden)
         {
-            return new ForbiddenException(message, code, error.Data);
+            return new ForbiddenException(message, code, error.Data, requestUri, requestMethod, reasonPhrase, rawResponseBody);
         }
-        if (statusCode == HttpStatusCode.UpgradeRequired)
+        if (response.StatusCode == HttpStatusCode.UpgradeRequired)
         {
-            return new UpgradeRequiredException(message, code, error.Data);
+            return new UpgradeRequiredException(message, code, error.Data, requestUri, requestMethod, reasonPhrase, rawResponseBody);
         }
 
-        return new ApiException(statusCode, message, code, error.Data);
+        return new ApiException(response.StatusCode, message, code, error.Data, requestUri, requestMethod, reasonPhrase, rawResponseBody);
     }
 
-    private async Task<ApiErrorResponse> ReadErrorResponseAsync(HttpResponseMessage response, CancellationToken ct)
+    private ApiErrorResponse ReadErrorResponse(HttpStatusCode statusCode, string? payload)
     {
-        try
+        if (!string.IsNullOrWhiteSpace(payload))
         {
-            var payload = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var parsed = JsonSerializer.Deserialize<ApiErrorResponse>(payload, _options);
-            if (parsed != null)
+            try
             {
-                return parsed;
+                var parsed = JsonSerializer.Deserialize<ApiErrorResponse>(payload, _options);
+                if (parsed != null)
+                {
+                    return parsed;
+                }
+            }
+            catch
+            {
+                // ignore
             }
         }
-        catch
-        {
-            // ignore
-        }
+
         return new ApiErrorResponse
         {
-            Message = string.Format("请求失败: {0}", (int)response.StatusCode)
+            Message = string.Format("请求失败: {0}", (int)statusCode)
         };
     }
 }
@@ -139,35 +156,72 @@ internal class ApiException : Exception
     public HttpStatusCode StatusCode { get; }
     public string? ErrorCode { get; }
     public JsonElement? ErrorData { get; }
+    public string? RequestUri { get; }
+    public string? RequestMethod { get; }
+    public string? ReasonPhrase { get; }
+    public string? RawResponseBody { get; }
 
-    public ApiException(HttpStatusCode statusCode, string message, string? errorCode = null, JsonElement? errorData = null) : base(message)
+    public ApiException(
+        HttpStatusCode statusCode,
+        string message,
+        string? errorCode = null,
+        JsonElement? errorData = null,
+        string? requestUri = null,
+        string? requestMethod = null,
+        string? reasonPhrase = null,
+        string? rawResponseBody = null) : base(message)
     {
         StatusCode = statusCode;
         ErrorCode = string.IsNullOrWhiteSpace(errorCode) ? null : errorCode;
         ErrorData = errorData;
+        RequestUri = string.IsNullOrWhiteSpace(requestUri) ? null : requestUri;
+        RequestMethod = string.IsNullOrWhiteSpace(requestMethod) ? null : requestMethod;
+        ReasonPhrase = string.IsNullOrWhiteSpace(reasonPhrase) ? null : reasonPhrase;
+        RawResponseBody = string.IsNullOrWhiteSpace(rawResponseBody) ? null : rawResponseBody;
     }
 }
 
 internal sealed class UnauthorizedException : ApiException
 {
-    public UnauthorizedException(string message, string? errorCode = null, JsonElement? errorData = null)
-        : base(HttpStatusCode.Unauthorized, message, errorCode, errorData)
+    public UnauthorizedException(
+        string message,
+        string? errorCode = null,
+        JsonElement? errorData = null,
+        string? requestUri = null,
+        string? requestMethod = null,
+        string? reasonPhrase = null,
+        string? rawResponseBody = null)
+        : base(HttpStatusCode.Unauthorized, message, errorCode, errorData, requestUri, requestMethod, reasonPhrase, rawResponseBody)
     {
     }
 }
 
 internal sealed class ForbiddenException : ApiException
 {
-    public ForbiddenException(string message, string? errorCode = null, JsonElement? errorData = null)
-        : base(HttpStatusCode.Forbidden, message, errorCode, errorData)
+    public ForbiddenException(
+        string message,
+        string? errorCode = null,
+        JsonElement? errorData = null,
+        string? requestUri = null,
+        string? requestMethod = null,
+        string? reasonPhrase = null,
+        string? rawResponseBody = null)
+        : base(HttpStatusCode.Forbidden, message, errorCode, errorData, requestUri, requestMethod, reasonPhrase, rawResponseBody)
     {
     }
 }
 
 internal sealed class UpgradeRequiredException : ApiException
 {
-    public UpgradeRequiredException(string message, string? errorCode = null, JsonElement? errorData = null)
-        : base(HttpStatusCode.UpgradeRequired, message, errorCode, errorData)
+    public UpgradeRequiredException(
+        string message,
+        string? errorCode = null,
+        JsonElement? errorData = null,
+        string? requestUri = null,
+        string? requestMethod = null,
+        string? reasonPhrase = null,
+        string? rawResponseBody = null)
+        : base(HttpStatusCode.UpgradeRequired, message, errorCode, errorData, requestUri, requestMethod, reasonPhrase, rawResponseBody)
     {
     }
 }
@@ -176,10 +230,16 @@ internal sealed class NeedReasonException : ApiException
 {
     public new JsonElement? Data { get; }
 
-    public NeedReasonException(HttpStatusCode statusCode, string message, JsonElement? data)
-        : base(statusCode, message, "need_reason", data)
+    public NeedReasonException(
+        HttpStatusCode statusCode,
+        string message,
+        JsonElement? data,
+        string? requestUri = null,
+        string? requestMethod = null,
+        string? reasonPhrase = null,
+        string? rawResponseBody = null)
+        : base(statusCode, message, "need_reason", data, requestUri, requestMethod, reasonPhrase, rawResponseBody)
     {
         Data = data;
     }
 }
-

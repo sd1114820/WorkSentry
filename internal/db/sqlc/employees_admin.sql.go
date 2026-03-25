@@ -10,9 +10,56 @@ import (
 	"database/sql"
 )
 
+const clearEmployeeFingerprint = `-- name: ClearEmployeeFingerprint :exec
+UPDATE employees
+SET fingerprint_hash = NULL
+WHERE id = ?
+`
+
+func (q *Queries) ClearEmployeeFingerprint(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, clearEmployeeFingerprint, id)
+	return err
+}
+
+const createEmployee = `-- name: CreateEmployee :exec
+INSERT INTO employees (employee_code, name, department_id, enabled)
+VALUES (?, ?, ?, ?)
+`
+
+type CreateEmployeeParams struct {
+	EmployeeCode string        `json:"employee_code"`
+	Name         string        `json:"name"`
+	DepartmentID sql.NullInt64 `json:"department_id"`
+	Enabled      bool          `json:"enabled"`
+}
+
+func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) error {
+	_, err := q.db.ExecContext(ctx, createEmployee,
+		arg.EmployeeCode,
+		arg.Name,
+		arg.DepartmentID,
+		arg.Enabled,
+	)
+	return err
+}
+
+const getMaxAutoEmployeeCodeNumber = `-- name: GetMaxAutoEmployeeCodeNumber :one
+SELECT CAST(COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS SIGNED) AS max_number
+FROM employees
+WHERE employee_code LIKE 'AUTO-%'
+`
+
+func (q *Queries) GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getMaxAutoEmployeeCodeNumber)
+	var max_number int64
+	err := row.Scan(&max_number)
+	return max_number, err
+}
+
 const listEmployeesAdmin = `-- name: ListEmployeesAdmin :many
 SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
-       ws.last_start_at, ws.last_end_at
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_start_at END AS last_start_at,
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_end_at END AS last_end_at
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 LEFT JOIN (
@@ -36,8 +83,8 @@ type ListEmployeesAdminRow struct {
 	FingerprintHash sql.NullString `json:"fingerprint_hash"`
 	Enabled         bool           `json:"enabled"`
 	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
-	LastStartAt     sql.NullTime   `json:"last_start_at"`
-	LastEndAt       sql.NullTime   `json:"last_end_at"`
+	LastStartAt     interface{}    `json:"last_start_at"`
+	LastEndAt       interface{}    `json:"last_end_at"`
 }
 
 func (q *Queries) ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminRow, error) {
@@ -76,7 +123,8 @@ func (q *Queries) ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminR
 
 const listEmployeesAdminByKeyword = `-- name: ListEmployeesAdminByKeyword :many
 SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
-       ws.last_start_at, ws.last_end_at
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_start_at END AS last_start_at,
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_end_at END AS last_end_at
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 LEFT JOIN (
@@ -106,8 +154,8 @@ type ListEmployeesAdminByKeywordRow struct {
 	FingerprintHash sql.NullString `json:"fingerprint_hash"`
 	Enabled         bool           `json:"enabled"`
 	LastSeenAt      sql.NullTime   `json:"last_seen_at"`
-	LastStartAt     sql.NullTime   `json:"last_start_at"`
-	LastEndAt       sql.NullTime   `json:"last_end_at"`
+	LastStartAt     interface{}    `json:"last_start_at"`
+	LastEndAt       interface{}    `json:"last_end_at"`
 }
 
 func (q *Queries) ListEmployeesAdminByKeyword(ctx context.Context, arg ListEmployeesAdminByKeywordParams) ([]ListEmployeesAdminByKeywordRow, error) {
@@ -142,41 +190,6 @@ func (q *Queries) ListEmployeesAdminByKeyword(ctx context.Context, arg ListEmplo
 		return nil, err
 	}
 	return items, nil
-}
-
-const getMaxAutoEmployeeCodeNumber = `-- name: GetMaxAutoEmployeeCodeNumber :one
-SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
-FROM employees
-WHERE employee_code LIKE 'AUTO-%'
-`
-
-func (q *Queries) GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getMaxAutoEmployeeCodeNumber)
-	var maxNumber int64
-	err := row.Scan(&maxNumber)
-	return maxNumber, err
-}
-
-const createEmployee = `-- name: CreateEmployee :exec
-INSERT INTO employees (employee_code, name, department_id, enabled)
-VALUES (?, ?, ?, ?)
-`
-
-type CreateEmployeeParams struct {
-	EmployeeCode string        `json:"employee_code"`
-	Name         string        `json:"name"`
-	DepartmentID sql.NullInt64 `json:"department_id"`
-	Enabled      bool          `json:"enabled"`
-}
-
-func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) error {
-	_, err := q.db.ExecContext(ctx, createEmployee,
-		arg.EmployeeCode,
-		arg.Name,
-		arg.DepartmentID,
-		arg.Enabled,
-	)
-	return err
 }
 
 const updateEmployee = `-- name: UpdateEmployee :exec
@@ -217,16 +230,5 @@ type UpdateEmployeeEnabledParams struct {
 
 func (q *Queries) UpdateEmployeeEnabled(ctx context.Context, arg UpdateEmployeeEnabledParams) error {
 	_, err := q.db.ExecContext(ctx, updateEmployeeEnabled, arg.Enabled, arg.ID)
-	return err
-}
-
-const clearEmployeeFingerprint = `-- name: ClearEmployeeFingerprint :exec
-UPDATE employees
-SET fingerprint_hash = NULL
-WHERE id = ?
-`
-
-func (q *Queries) ClearEmployeeFingerprint(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, clearEmployeeFingerprint, id)
 	return err
 }

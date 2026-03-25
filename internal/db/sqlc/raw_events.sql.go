@@ -67,9 +67,21 @@ ORDER BY received_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLastRawEventByEmployee(ctx context.Context, employeeID int64) (RawEvent, error) {
+type GetLastRawEventByEmployeeRow struct {
+	ID            int64           `json:"id"`
+	EmployeeID    int64           `json:"employee_id"`
+	ReceivedAt    time.Time       `json:"received_at"`
+	ProcessName   sql.NullString  `json:"process_name"`
+	WindowTitle   sql.NullString  `json:"window_title"`
+	IdleSeconds   int32           `json:"idle_seconds"`
+	Status        RawEventsStatus `json:"status"`
+	ClientVersion sql.NullString  `json:"client_version"`
+	IpAddress     sql.NullString  `json:"ip_address"`
+}
+
+func (q *Queries) GetLastRawEventByEmployee(ctx context.Context, employeeID int64) (GetLastRawEventByEmployeeRow, error) {
 	row := q.db.QueryRowContext(ctx, getLastRawEventByEmployee, employeeID)
-	var i RawEvent
+	var i GetLastRawEventByEmployeeRow
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeID,

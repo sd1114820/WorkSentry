@@ -234,7 +234,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if shouldUpdateEmployeeLastSeen(employee, status, description, now) {
+	if shouldUpdateEmployeeLastSeen(employee.LastSeenAt, employee.LastStatus, employee.LastDescription, status, description, now) {
 		_ = h.Queries.UpdateEmployeeLastSeen(r.Context(), sqlc.UpdateEmployeeLastSeenParams{
 			LastSeenAt:      sql.NullTime{Time: now, Valid: true},
 			LastStatus:      sqlc.NullEmployeesLastStatus{EmployeesLastStatus: sqlc.EmployeesLastStatus(status), Valid: true},
@@ -271,7 +271,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	workEndAccepted := false
 	var workEndErr error
 	if reportType == "work_end" {
-		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(r.Context(), employee, payload, now)
+		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(r.Context(), employee.ID, employee.DepartmentID, payload, now)
 	}
 
 	isWorking := reportType != "work_end" || !workEndAccepted
@@ -326,20 +326,20 @@ func shouldUpdateTokenLastSeen(token sqlc.ClientToken, now time.Time) bool {
 	return now.Sub(token.LastSeen.Time) >= tokenLastSeenMinWriteInterval
 }
 
-func shouldUpdateEmployeeLastSeen(employee sqlc.Employee, status string, description string, now time.Time) bool {
-	if !employee.LastSeenAt.Valid {
+func shouldUpdateEmployeeLastSeen(lastSeenAt sql.NullTime, lastStatus sqlc.NullEmployeesLastStatus, lastDescription sql.NullString, status string, description string, now time.Time) bool {
+	if !lastSeenAt.Valid {
 		return true
 	}
-	if now.Sub(employee.LastSeenAt.Time) >= employeeLastSeenMinWriteInterval {
+	if now.Sub(lastSeenAt.Time) >= employeeLastSeenMinWriteInterval {
 		return true
 	}
-	if !employee.LastStatus.Valid {
+	if !lastStatus.Valid {
 		return true
 	}
-	if string(employee.LastStatus.EmployeesLastStatus) != status {
+	if string(lastStatus.EmployeesLastStatus) != status {
 		return true
 	}
-	if strings.TrimSpace(nullString(employee.LastDescription)) != strings.TrimSpace(description) {
+	if strings.TrimSpace(nullString(lastDescription)) != strings.TrimSpace(description) {
 		return true
 	}
 	return false
@@ -380,7 +380,7 @@ func (h *Handler) handleWorkSessionReport(ctx context.Context, employeeID int64,
 	case "work_end":
 		if err := h.Queries.CloseWorkSession(ctx, sqlc.CloseWorkSessionParams{
 			EmployeeID: employeeID,
-			EndAt:      now,
+			EndAt:      sql.NullTime{Time: now, Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入下班记录失败")
 		}

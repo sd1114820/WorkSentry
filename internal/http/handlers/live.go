@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -31,8 +32,10 @@ func (h *Handler) buildLiveSnapshot(r *http.Request) []LiveView {
 	dayEnd := dayStart.Add(24 * time.Hour)
 
 	rows, err := h.Queries.ListLiveSnapshot(r.Context(), sqlc.ListLiveSnapshotParams{
-		DayStart: dayStart,
-		DayEnd:   dayEnd,
+		StartAt:   dayStart,
+		StartAt_2: dayEnd,
+		EndAt:     sql.NullTime{Time: dayStart, Valid: true},
+		EndAt_2:   sql.NullTime{Time: dayEnd, Valid: true},
 	})
 	if err != nil {
 		return []LiveView{}

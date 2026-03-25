@@ -1,6 +1,7 @@
 -- name: ListEmployeesAdmin :many
 SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
-       ws.last_start_at, ws.last_end_at
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_start_at END AS last_start_at,
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_end_at END AS last_end_at
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 LEFT JOIN (
@@ -16,7 +17,8 @@ ORDER BY e.id DESC;
 
 -- name: ListEmployeesAdminByKeyword :many
 SELECT e.id, e.employee_code, e.name, e.department_id, d.name AS department_name, e.fingerprint_hash, e.enabled, e.last_seen_at,
-       ws.last_start_at, ws.last_end_at
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_start_at END AS last_start_at,
+       CASE WHEN ws.employee_id IS NULL THEN NULL ELSE ws.last_end_at END AS last_end_at
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 LEFT JOIN (
@@ -33,7 +35,7 @@ ORDER BY e.id DESC;
 
 
 -- name: GetMaxAutoEmployeeCodeNumber :one
-SELECT COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS max_number
+SELECT CAST(COALESCE(MAX(CAST(SUBSTRING(employee_code, 6) AS UNSIGNED)), 0) AS SIGNED) AS max_number
 FROM employees
 WHERE employee_code LIKE 'AUTO-%';
 

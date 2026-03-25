@@ -16,12 +16,12 @@ LEFT JOIN (
   GROUP BY employee_id
 ) ws ON ws.employee_id = e.id
 LEFT JOIN (
-  SELECT employee_id,
+  SELECT ws.employee_id,
          CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS has_today_punch
-  FROM work_sessions
-  WHERE (start_at >= ?1 AND start_at < ?2)
-     OR (end_at >= ?1 AND end_at < ?2)
-  GROUP BY employee_id
+  FROM work_sessions ws
+  WHERE (ws.start_at >= ? AND ws.start_at < ?)
+     OR (ws.end_at >= ? AND ws.end_at < ?)
+  GROUP BY ws.employee_id
 ) tp ON tp.employee_id = e.id
 WHERE e.enabled = 1
 ORDER BY e.id DESC;

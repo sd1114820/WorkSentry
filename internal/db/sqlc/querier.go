@@ -13,6 +13,7 @@ import (
 type Querier interface {
 	AddDailyStats(ctx context.Context, arg AddDailyStatsParams) error
 	ClearEmployeeFingerprint(ctx context.Context, id int64) error
+	CloseWorkSession(ctx context.Context, arg CloseWorkSessionParams) error
 	CountAdminUsers(ctx context.Context) (int64, error)
 	CountEmployeesByDepartment(ctx context.Context, departmentID sql.NullInt64) (int64, error)
 	CountNonOfflineSegmentsOverlap(ctx context.Context, arg CountNonOfflineSegmentsOverlapParams) (int64, error)
@@ -22,16 +23,13 @@ type Querier interface {
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) error
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) error
-	GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error)
 	CreateIncident(ctx context.Context, arg CreateIncidentParams) (sql.Result, error)
 	CreateManualAdjustment(ctx context.Context, arg CreateManualAdjustmentParams) (sql.Result, error)
 	CreateRawEvent(ctx context.Context, arg CreateRawEventParams) error
 	CreateRule(ctx context.Context, arg CreateRuleParams) (sql.Result, error)
 	CreateTimeSegment(ctx context.Context, arg CreateTimeSegmentParams) error
-	CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) error
-	CloseWorkSession(ctx context.Context, arg CloseWorkSessionParams) error
-	GetOpenWorkSessionByEmployee(ctx context.Context, employeeID int64) (WorkSession, error)
 	CreateToken(ctx context.Context, arg CreateTokenParams) error
+	CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) error
 	DeleteDepartment(ctx context.Context, id int64) error
 	DeleteIncident(ctx context.Context, id int64) error
 	DeleteManualSegment(ctx context.Context, arg DeleteManualSegmentParams) error
@@ -39,10 +37,12 @@ type Querier interface {
 	DeleteRule(ctx context.Context, id int64) error
 	GetAdminSession(ctx context.Context, token string) (AdminSession, error)
 	GetAdminUserByUsername(ctx context.Context, username string) (AdminUser, error)
-	GetEmployeeByCode(ctx context.Context, employeeCode string) (Employee, error)
-	GetEmployeeByID(ctx context.Context, id int64) (Employee, error)
-	GetLastRawEventByEmployee(ctx context.Context, employeeID int64) (RawEvent, error)
+	GetEmployeeByCode(ctx context.Context, employeeCode string) (GetEmployeeByCodeRow, error)
+	GetEmployeeByID(ctx context.Context, id int64) (GetEmployeeByIDRow, error)
+	GetLastRawEventByEmployee(ctx context.Context, employeeID int64) (GetLastRawEventByEmployeeRow, error)
 	GetManualAdjustment(ctx context.Context, id int64) (ManualAdjustment, error)
+	GetMaxAutoEmployeeCodeNumber(ctx context.Context) (int64, error)
+	GetOpenWorkSessionByEmployee(ctx context.Context, employeeID int64) (WorkSession, error)
 	GetSettings(ctx context.Context) (Setting, error)
 	GetToken(ctx context.Context, token string) (ClientToken, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
@@ -52,7 +52,7 @@ type Querier interface {
 	ListEmployees(ctx context.Context) ([]ListEmployeesRow, error)
 	ListEmployeesAdmin(ctx context.Context) ([]ListEmployeesAdminRow, error)
 	ListEmployeesAdminByKeyword(ctx context.Context, arg ListEmployeesAdminByKeywordParams) ([]ListEmployeesAdminByKeywordRow, error)
-	ListEmployeesForOfflineRefresh(ctx context.Context) ([]Employee, error)
+	ListEmployeesForOfflineRefresh(ctx context.Context) ([]ListEmployeesForOfflineRefreshRow, error)
 	ListEnabledRules(ctx context.Context) ([]ListEnabledRulesRow, error)
 	ListIncidents(ctx context.Context, arg ListIncidentsParams) ([]SystemIncident, error)
 	ListLiveSnapshot(ctx context.Context, arg ListLiveSnapshotParams) ([]ListLiveSnapshotRow, error)

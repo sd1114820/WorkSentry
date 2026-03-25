@@ -220,11 +220,11 @@ func (h *Handler) listCheckoutFields(w http.ResponseWriter, r *http.Request) {
 			ID:         item.ID,
 			TemplateID: item.TemplateID,
 			Name:       item.NameZh,
-			Type:       item.Type,
+			Type:       string(item.Type),
 			Required:   item.Required,
 			SortOrder:  item.SortOrder,
 			Enabled:    item.Enabled,
-			Options:    parseOptions(item.OptionsZhJSON),
+			Options:    parseOptions(item.OptionsZhJson),
 		})
 	}
 
