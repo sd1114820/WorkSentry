@@ -67,6 +67,8 @@ internal sealed class OperationResult<T>
 
 internal sealed class ReportManager
 {
+    private const int MaxPendingClientEventIds = 256;
+
     private readonly AppConfig _config;
     private readonly ConfigStore _configStore;
     private readonly TokenStore _tokenStore;
@@ -82,6 +84,7 @@ internal sealed class ReportManager
     private DateTime _lastConnectivityErrorEnqueuedAtUtc = DateTime.MinValue;
     private string? _token;
     private string _optionalUpdateNotified = "";
+    private readonly Dictionary<string, string> _pendingClientEventIds = new(StringComparer.Ordinal);
     private bool _forceReport;
     private bool _isBreaking;
 
@@ -373,10 +376,13 @@ internal sealed class ReportManager
             return ReportResult.Fail(LanguageService.GetString("ErrRetryLater"), "backoff_blocked");
         }
 
+        var reportKey = BuildReportEventKey(sample, reportType, checkout, reason);
         try
         {
             await EnsureBoundAsync(ct).ConfigureAwait(false);
-            var response = await SendReportAsync(sample, reportType, ct, checkout, reason).ConfigureAwait(false);
+            var clientEventId = GetOrCreateClientEventId(reportKey);
+            var response = await SendReportAsync(sample, reportType, clientEventId, ct, checkout, reason).ConfigureAwait(false);
+            ClearClientEventId(reportKey);
             _backoff.RegisterSuccess();
             _lastSuccessfulReportAtUtc = DateTime.UtcNow;
             if (DateTime.UtcNow - _lastErrorFlushAtUtc >= TimeSpan.FromMinutes(1))
@@ -396,11 +402,16 @@ internal sealed class ReportManager
         }
         catch (NeedReasonException ex)
         {
+            ClearClientEventId(reportKey);
             _logger.Warn(ex.Message);
             return ReportResult.Fail(ex.Message, "need_reason", ex.Data);
         }
         catch (Exception ex)
         {
+            if (ex is ApiException apiException && (int)apiException.StatusCode < 500)
+            {
+                ClearClientEventId(reportKey);
+            }
             if (ex is ApiException || ex is HttpRequestException || ex is TaskCanceledException)
             {
                 var lastSuccess = _lastSuccessfulReportAtUtc == DateTime.MinValue
@@ -460,7 +471,7 @@ internal sealed class ReportManager
         return ReportResult.Fail(mapping.Message, mapping.ErrorCode, mapping.ErrorData, mapping.ShouldFocusEmployeeCode);
     }
 
-    private async Task<ClientReportResponse> SendReportAsync(SampleState sample, string reportType, CancellationToken ct, ClientCheckoutPayload? checkout, string? reason = null)
+    private async Task<ClientReportResponse> SendReportAsync(SampleState sample, string reportType, string clientEventId, CancellationToken ct, ClientCheckoutPayload? checkout, string? reason = null)
     {
         if (string.IsNullOrWhiteSpace(_token))
         {
@@ -474,9 +485,45 @@ internal sealed class ReportManager
             IdleSeconds = sample.IdleSeconds,
             ClientVersion = AppConstants.ClientVersion,
             ReportType = reportType,
+            ClientEventId = clientEventId,
             Checkout = checkout,
             Reason = reason ?? string.Empty
         }, _token!, ct).ConfigureAwait(false);
+    }
+
+    private string GetOrCreateClientEventId(string reportKey)
+    {
+        if (_pendingClientEventIds.TryGetValue(reportKey, out var existing) && !string.IsNullOrWhiteSpace(existing))
+        {
+            return existing;
+        }
+
+        var created = Guid.NewGuid().ToString("N");
+        if (_pendingClientEventIds.Count >= MaxPendingClientEventIds)
+        {
+            _pendingClientEventIds.Clear();
+        }
+        _pendingClientEventIds[reportKey] = created;
+        return created;
+    }
+
+    private void ClearClientEventId(string reportKey)
+    {
+        _pendingClientEventIds.Remove(reportKey);
+    }
+
+    private static string BuildReportEventKey(SampleState sample, string reportType, ClientCheckoutPayload? checkout, string? reason)
+    {
+        var checkoutKey = checkout == null
+            ? ""
+            : JsonSerializer.Serialize(checkout);
+        return string.Join('\u001f',
+            reportType,
+            sample.ProcessName,
+            sample.WindowTitle,
+            sample.IdleSeconds.ToString(),
+            checkoutKey,
+            reason ?? string.Empty);
     }
 
     private void ApplyServerSettings(int idleThreshold, int heartbeatInterval, int offlineThreshold, int updatePolicy, string latestVersion, string updateUrl)
@@ -564,9 +611,6 @@ internal sealed class ReportManager
         Stop();
     }
 }
-
-
-
 
 
 

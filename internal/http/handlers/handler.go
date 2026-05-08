@@ -14,6 +14,7 @@ import (
 
 	"worksentry/internal/config"
 	"worksentry/internal/db/sqlc"
+	"worksentry/internal/mq"
 )
 
 type Handler struct {
@@ -21,6 +22,7 @@ type Handler struct {
 	Queries *sqlc.Queries
 	Hub     *LiveHub
 	DB      *sql.DB
+	MQ      mq.Producer
 
 	settingsMu       sync.RWMutex
 	settingsCache    sqlc.Setting
@@ -34,15 +36,23 @@ type Handler struct {
 }
 
 func NewHandler(cfg *config.Config, db sqlc.DBTX) *Handler {
+	return NewHandlerWithProducer(cfg, db, mq.NewProducer(cfg.MQ))
+}
+
+func NewHandlerWithProducer(cfg *config.Config, db sqlc.DBTX, producer mq.Producer) *Handler {
 	var sqlDB *sql.DB
 	if typed, ok := db.(*sql.DB); ok {
 		sqlDB = typed
+	}
+	if producer == nil {
+		producer = mq.DisabledProducer{}
 	}
 	return &Handler{
 		Config:  cfg,
 		Queries: sqlc.New(db),
 		Hub:     NewLiveHub(),
 		DB:      sqlDB,
+		MQ:      producer,
 	}
 }
 

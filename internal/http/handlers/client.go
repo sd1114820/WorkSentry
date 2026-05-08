@@ -40,6 +40,7 @@ type ClientReportRequest struct {
 	IdleSeconds   int32                  `json:"idleSeconds"`
 	ClientVersion string                 `json:"clientVersion"`
 	ReportType    string                 `json:"reportType"`
+	ClientEventID string                 `json:"clientEventId"`
 	Checkout      *ClientCheckoutPayload `json:"checkout"`
 	Reason        string                 `json:"reason"`
 }
@@ -174,6 +175,11 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "参数格式错误")
 		return
 	}
+	clientEventID, err := normalizeClientEventID(payload.ClientEventID)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "client_event_id_invalid", err.Error())
+		return
+	}
 
 	employee, err := h.Queries.GetEmployeeByID(r.Context(), clientToken.EmployeeID)
 	if err != nil {
@@ -218,9 +224,62 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		description = "休息中"
 	}
 
+	ingestID, err := generateIngestID()
+	if err != nil {
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "生成上报流水失败")
+		return
+	}
+	sourceEventID := buildSourceEventID(employee.ID, clientEventID)
+	event := clientReportIngestEvent{
+		IngestID:      ingestID,
+		SourceEventID: sourceEventID,
+		ClientEventID: clientEventID,
+		EmployeeID:    employee.ID,
+		ReceivedAt:    formatTime(now),
+		ProcessName:   strings.TrimSpace(payload.ProcessName),
+		WindowTitle:   strings.TrimSpace(payload.WindowTitle),
+		IdleSeconds:   payload.IdleSeconds,
+		Status:        status,
+		ClientVersion: strings.TrimSpace(payload.ClientVersion),
+		IPAddress:     clientIP(r),
+		ReportType:    reportType,
+		Reason:        strings.TrimSpace(payload.Reason),
+		Checkout:      payload.Checkout,
+	}
+	if err := h.acceptClientReportEvent(r.Context(), event); err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_ingest_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	duplicateEvent, err := h.beginClientReportProcessing(r.Context(), event)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	if duplicateEvent {
+		writeJSON(w, http.StatusOK, ClientReportResponse{
+			IdleThresholdSeconds:     settings.IdleThresholdSeconds,
+			HeartbeatIntervalSeconds: settings.HeartbeatIntervalSeconds,
+			OfflineThresholdSeconds:  settings.OfflineThresholdSeconds,
+			UpdatePolicy:             int32(settings.UpdatePolicy),
+			LatestVersion:            nullString(settings.LatestVersion),
+			UpdateURL:                nullString(settings.UpdateUrl),
+			ServerTime:               formatTime(now),
+		})
+		return
+	}
+	processingCompleted := false
+	defer func() {
+		if !processingCompleted {
+			h.abandonClientReportProcessing(r.Context(), event)
+		}
+	}()
+
 	prevEvent, prevErr := h.Queries.GetLastRawEventByEmployee(r.Context(), employee.ID)
 
 	if err := h.Queries.CreateRawEvent(r.Context(), sqlc.CreateRawEventParams{
+		IngestID:      toNullString(ingestID),
+		SourceEventID: toNullString(sourceEventID),
+		ClientEventID: toNullString(clientEventID),
 		EmployeeID:    employee.ID,
 		ReceivedAt:    now,
 		ProcessName:   toNullString(payload.ProcessName),
@@ -233,6 +292,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "写入上报失败")
 		return
 	}
+	processingCompleted = true
 
 	if shouldUpdateEmployeeLastSeen(employee, status, description, now) {
 		_ = h.Queries.UpdateEmployeeLastSeen(r.Context(), sqlc.UpdateEmployeeLastSeenParams{
@@ -251,10 +311,10 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		gap := now.Sub(prevEvent.ReceivedAt)
 		if now.After(segmentStart) {
 			if gap > time.Duration(settings.OfflineThresholdSeconds)*time.Second {
-				h.createSegmentAndStatsByContext(r.Context(), employee.ID, segmentStart, now, "offline", "", "offline")
+				h.createSegmentAndStatsByContextForEvent(r.Context(), eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, segmentStart, now, "offline", "", "offline")
 			} else {
 				prevDesc := buildDescription(nullString(prevEvent.ProcessName), nullString(prevEvent.WindowTitle))
-				h.createSegmentAndStatsByContext(r.Context(), employee.ID, segmentStart, now, string(prevEvent.Status), prevDesc, "system")
+				h.createSegmentAndStatsByContextForEvent(r.Context(), eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, segmentStart, now, string(prevEvent.Status), prevDesc, "system")
 			}
 		}
 	}
@@ -305,6 +365,11 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeError(w, http.StatusBadRequest, workEndErr.Error())
 		}
+		return
+	}
+
+	if err := h.completeClientReportProcessing(r.Context(), event); err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
 		return
 	}
 
@@ -432,6 +497,10 @@ func ruleMatch(rule sqlc.ListEnabledRulesRow, processName string, windowTitle st
 }
 
 func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
+	h.createSegmentAndStatsByContextForEvent(ctx, "", "", "", employeeID, start, end, status, description, source)
+}
+
+func (h *Handler) createSegmentAndStatsByContextForEvent(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
 	if end.Before(start) || end.Equal(start) {
 		return
 	}
@@ -454,7 +523,7 @@ FROM time_segments WHERE employee_id = ? ORDER BY end_at DESC, id DESC LIMIT 1`,
 			if lastEnd.Equal(start) && lastStatus == status && lastSource == source && lastDescription == description {
 				if result, err := h.DB.ExecContext(ctx, "UPDATE time_segments SET end_at = ? WHERE id = ? AND end_at = ?", end, lastID, lastEnd); err == nil {
 					if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows > 0 {
-						h.addDailyStatsByRange(ctx, employeeID, status, start, end)
+						h.addDailyStatsByRange(ctx, eventKey, ingestID, sourceEventID, employeeID, status, start, end)
 						return
 					}
 				}
@@ -471,12 +540,18 @@ FROM time_segments WHERE employee_id = ? ORDER BY end_at DESC, id DESC LIMIT 1`,
 		Source:      sqlc.TimeSegmentsSource(source),
 	})
 
-	h.addDailyStatsByRange(ctx, employeeID, status, start, end)
+	h.addDailyStatsByRange(ctx, eventKey, ingestID, sourceEventID, employeeID, status, start, end)
 }
 
-func (h *Handler) addDailyStatsByRange(ctx context.Context, employeeID int64, status string, start time.Time, end time.Time) {
+func (h *Handler) addDailyStatsByRange(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, status string, start time.Time, end time.Time) {
 	for _, part := range splitByDay(start, end) {
 		increments := buildDailyStatIncrement(status, part.Seconds)
+		if strings.TrimSpace(eventKey) != "" && h.DB != nil {
+			applied, err := h.insertStatDelta(ctx, eventKey, ingestID, sourceEventID, employeeID, part.Date, increments)
+			if err != nil || !applied {
+				continue
+			}
+		}
 		_ = h.Queries.AddDailyStats(ctx, sqlc.AddDailyStatsParams{
 			StatDate:          part.Date,
 			EmployeeID:        employeeID,
