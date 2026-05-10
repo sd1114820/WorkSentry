@@ -6,6 +6,7 @@ server:
 
 database:
   dsn: "root:password@tcp(127.0.0.1:3306)/worksentry?parseTime=true&loc=Local&charset=utf8mb4"
+  raw_events_retention_days: 3
 
 app:
   timezone: "Asia/Shanghai"

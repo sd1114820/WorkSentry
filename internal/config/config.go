@@ -21,7 +21,8 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	DSN string `yaml:"dsn"`
+	DSN                    string `yaml:"dsn"`
+	RawEventsRetentionDays int    `yaml:"raw_events_retention_days"`
 }
 
 type AppConfig struct {
@@ -54,6 +55,9 @@ func Load(path string) (*Config, error) {
 	if cfg.Database.DSN == "" {
 		return nil, errors.New("数据库连接不能为空")
 	}
+	if cfg.Database.RawEventsRetentionDays <= 0 {
+		cfg.Database.RawEventsRetentionDays = 3
+	}
 
 	return &cfg, nil
 }
@@ -65,6 +69,9 @@ func defaultConfig() Config {
 			ReadTimeoutSeconds:  15,
 			WriteTimeoutSeconds: 15,
 			IdleTimeoutSeconds:  60,
+		},
+		Database: DatabaseConfig{
+			RawEventsRetentionDays: 3,
 		},
 		App: AppConfig{
 			Timezone:    "Asia/Shanghai",

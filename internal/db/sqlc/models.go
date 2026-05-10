@@ -100,11 +100,12 @@ func (ns NullDepartmentStatusThresholdsTriggerAction) Value() (driver.Value, err
 type EmployeesLastStatus string
 
 const (
-	EmployeesLastStatusWork   EmployeesLastStatus = "work"
-	EmployeesLastStatusNormal EmployeesLastStatus = "normal"
-	EmployeesLastStatusFish   EmployeesLastStatus = "fish"
-	EmployeesLastStatusIdle   EmployeesLastStatus = "idle"
-	EmployeesLastStatusBreak  EmployeesLastStatus = "break"
+	EmployeesLastStatusWork    EmployeesLastStatus = "work"
+	EmployeesLastStatusNormal  EmployeesLastStatus = "normal"
+	EmployeesLastStatusFish    EmployeesLastStatus = "fish"
+	EmployeesLastStatusIdle    EmployeesLastStatus = "idle"
+	EmployeesLastStatusBreak   EmployeesLastStatus = "break"
+	EmployeesLastStatusOffline EmployeesLastStatus = "offline"
 )
 
 func (e *EmployeesLastStatus) Scan(src interface{}) error {
@@ -187,11 +188,12 @@ func (ns NullManualAdjustmentsStatus) Value() (driver.Value, error) {
 type RawEventsStatus string
 
 const (
-	RawEventsStatusWork   RawEventsStatus = "work"
-	RawEventsStatusNormal RawEventsStatus = "normal"
-	RawEventsStatusFish   RawEventsStatus = "fish"
-	RawEventsStatusIdle   RawEventsStatus = "idle"
-	RawEventsStatusBreak  RawEventsStatus = "break"
+	RawEventsStatusWork    RawEventsStatus = "work"
+	RawEventsStatusNormal  RawEventsStatus = "normal"
+	RawEventsStatusFish    RawEventsStatus = "fish"
+	RawEventsStatusIdle    RawEventsStatus = "idle"
+	RawEventsStatusBreak   RawEventsStatus = "break"
+	RawEventsStatusOffline RawEventsStatus = "offline"
 )
 
 func (e *RawEventsStatus) Scan(src interface{}) error {
@@ -505,17 +507,18 @@ type DepartmentWorkRule struct {
 }
 
 type Employee struct {
-	ID               int64                   `json:"id"`
-	EmployeeCode     string                  `json:"employee_code"`
-	Name             string                  `json:"name"`
-	DepartmentID     sql.NullInt64           `json:"department_id"`
-	FingerprintHash  sql.NullString          `json:"fingerprint_hash"`
-	Enabled          bool                    `json:"enabled"`
-	LastSeenAt       sql.NullTime            `json:"last_seen_at"`
-	LastDescription  sql.NullString          `json:"last_description"`
-	LastSegmentEndAt sql.NullTime            `json:"last_segment_end_at"`
-	CreatedAt        time.Time               `json:"created_at"`
-	LastStatus       NullEmployeesLastStatus `json:"last_status"`
+	ID                      int64                   `json:"id"`
+	EmployeeCode            string                  `json:"employee_code"`
+	Name                    string                  `json:"name"`
+	DepartmentID            sql.NullInt64           `json:"department_id"`
+	FingerprintHash         sql.NullString          `json:"fingerprint_hash"`
+	Enabled                 bool                    `json:"enabled"`
+	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
+	LastDescription         sql.NullString          `json:"last_description"`
+	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
+	CreatedAt               time.Time               `json:"created_at"`
+	LastStatus              NullEmployeesLastStatus `json:"last_status"`
+	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
 }
 
 type ManualAdjustment struct {

@@ -70,8 +70,7 @@ type Querier interface {
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) error
 	UpdateEmployeeEnabled(ctx context.Context, arg UpdateEmployeeEnabledParams) error
 	UpdateEmployeeFingerprint(ctx context.Context, arg UpdateEmployeeFingerprintParams) error
-	UpdateEmployeeLastSeen(ctx context.Context, arg UpdateEmployeeLastSeenParams) error
-	UpdateEmployeeLastSegmentEnd(ctx context.Context, arg UpdateEmployeeLastSegmentEndParams) error
+	UpdateEmployeeTrackingState(ctx context.Context, arg UpdateEmployeeTrackingStateParams) error
 	UpdateIncident(ctx context.Context, arg UpdateIncidentParams) error
 	UpdateManualAdjustment(ctx context.Context, arg UpdateManualAdjustmentParams) error
 	UpdateManualSegment(ctx context.Context, arg UpdateManualSegmentParams) error

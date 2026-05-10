@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"sort"
@@ -133,19 +134,18 @@ func (h *Handler) ReportTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
-	end := start.Add(24 * time.Hour)
+	dayStart, dayEnd, reportEnd := reportDayBounds(date)
 	segments, err := h.Queries.ListTimeSegmentsByEmployeeAndRange(r.Context(), sqlc.ListTimeSegmentsByEmployeeAndRangeParams{
 		EmployeeID: employee.ID,
-		StartAt:    end,
-		EndAt:      start,
+		StartAt:    dayEnd,
+		EndAt:      dayStart,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取时间轴失败")
 		return
 	}
 
-	items := make([]TimelineItem, 0, len(segments))
+	items := make([]TimelineItem, 0, len(segments)+1)
 	for _, seg := range segments {
 		statusCode := string(seg.Status)
 		items = append(items, TimelineItem{
@@ -157,6 +157,37 @@ func (h *Handler) ReportTimeline(w http.ResponseWriter, r *http.Request) {
 			Description: nullString(seg.Description),
 			SourceLabel: sourceLabel(string(seg.Source)),
 		})
+	}
+
+	if employee.CurrentSegmentStartedAt.Valid && employee.LastStatus.Valid {
+		if _, err := h.Queries.GetOpenWorkSessionByEmployee(r.Context(), employee.ID); err == nil {
+			segmentStart := employee.CurrentSegmentStartedAt.Time
+			segmentEnd := reportEnd
+			if employee.LastSegmentEndAt.Valid && employee.LastSegmentEndAt.Time.After(segmentEnd) {
+				segmentEnd = employee.LastSegmentEndAt.Time
+			}
+			if segmentEnd.After(dayEnd) {
+				segmentEnd = dayEnd
+			}
+			if segmentStart.Before(dayStart) {
+				segmentStart = dayStart
+			}
+			if segmentEnd.After(segmentStart) {
+				statusCode := string(employee.LastStatus.EmployeesLastStatus)
+				items = append(items, TimelineItem{
+					StatusLabel: statusLabel(statusCode),
+					StatusCode:  statusCode,
+					StartAt:     formatTime(segmentStart),
+					EndAt:       formatTime(segmentEnd),
+					Duration:    formatDuration(int64(segmentEnd.Sub(segmentStart).Seconds())),
+					Description: nullString(employee.LastDescription),
+					SourceLabel: sourceLabel(sourceForTrackedStatus(statusCode)),
+				})
+			}
+		} else if err != sql.ErrNoRows {
+			writeError(w, http.StatusInternalServerError, "读取时间轴失败")
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
