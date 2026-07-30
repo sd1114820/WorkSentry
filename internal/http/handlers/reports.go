@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -77,6 +78,7 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 		DepartmentID: toNullInt64(departmentID),
 	})
 	if err != nil {
+		log.Printf("读取日报失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "读取报表失败")
 		return
 	}
@@ -179,6 +181,7 @@ func (h *Handler) ReportRank(w http.ResponseWriter, r *http.Request) {
 		DepartmentID: toNullInt64(0),
 	})
 	if err != nil {
+		log.Printf("读取团队排行失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "读取排行失败")
 		return
 	}
