@@ -12,6 +12,7 @@ import (
 func (h *Handler) StartBackgroundJobs(ctx context.Context) {
 	go h.offlineRefreshLoop(ctx)
 	go h.rawCleanupLoop(ctx)
+	go h.outboxRelayLoop(ctx)
 }
 
 func (h *Handler) offlineRefreshLoop(ctx context.Context) {
@@ -36,6 +37,19 @@ func (h *Handler) rawCleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			h.cleanupRawEvents(ctx)
+		}
+	}
+}
+
+func (h *Handler) outboxRelayLoop(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.relayClientReportOutbox(ctx, 100)
 		}
 	}
 }

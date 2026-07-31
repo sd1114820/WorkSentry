@@ -8,6 +8,14 @@ database:
   dsn: "root:password@tcp(127.0.0.1:3306)/worksentry?parseTime=true&loc=Local&charset=utf8mb4"
   raw_events_retention_days: 3
 
+mq:
+  enabled: false
+  provider: "kafka"
+  brokers:
+    - "127.0.0.1:9092"
+  topic: "worksentry.client.reports"
+  write_timeout_seconds: 3
+
 app:
   timezone: "Asia/Shanghai"
   environment: "dev"

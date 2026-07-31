@@ -48,6 +48,7 @@ func main() {
 	}
 
 	h := handlers.NewHandler(cfg, sqlDB)
+	defer h.MQ.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.StartBackgroundJobs(ctx)

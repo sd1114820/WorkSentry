@@ -40,6 +40,7 @@ type ClientReportRequest struct {
 	IdleSeconds   int32                  `json:"idleSeconds"`
 	ClientVersion string                 `json:"clientVersion"`
 	ReportType    string                 `json:"reportType"`
+	ClientEventID string                 `json:"clientEventId"`
 	Checkout      *ClientCheckoutPayload `json:"checkout"`
 	Reason        string                 `json:"reason"`
 }
@@ -171,6 +172,11 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "参数格式错误")
 		return
 	}
+	clientEventID, err := normalizeClientEventID(payload.ClientEventID)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "client_event_id_invalid", err.Error())
+		return
+	}
 
 	employee, err := h.Queries.GetEmployeeByID(r.Context(), clientToken.EmployeeID)
 	if err != nil {
@@ -214,6 +220,60 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		description = "休息中"
 	}
 
+	ctx := r.Context()
+	ipAddress := clientIP(r)
+	ingestID, err := generateIngestID()
+	if err != nil {
+		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "生成上报流水失败")
+		return
+	}
+	sourceEventID := buildSourceEventID(employee.ID, clientEventID)
+	event := clientReportIngestEvent{
+		IngestID:      ingestID,
+		SourceEventID: sourceEventID,
+		ClientEventID: clientEventID,
+		EmployeeID:    employee.ID,
+		ReceivedAt:    formatTime(now),
+		ProcessName:   strings.TrimSpace(payload.ProcessName),
+		WindowTitle:   strings.TrimSpace(payload.WindowTitle),
+		IdleSeconds:   payload.IdleSeconds,
+		Status:        status,
+		ClientVersion: strings.TrimSpace(payload.ClientVersion),
+		IPAddress:     ipAddress,
+		ReportType:    reportType,
+		Reason:        strings.TrimSpace(payload.Reason),
+		Checkout:      payload.Checkout,
+	}
+	if err := h.acceptClientReportEvent(ctx, event); err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_ingest_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	duplicateEvent, err := h.beginClientReportProcessing(ctx, event)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	if duplicateEvent {
+		writeJSON(w, http.StatusOK, ClientReportResponse{
+			IdleThresholdSeconds:     settings.IdleThresholdSeconds,
+			HeartbeatIntervalSeconds: settings.HeartbeatIntervalSeconds,
+			OfflineThresholdSeconds:  settings.OfflineThresholdSeconds,
+			UpdatePolicy:             int32(settings.UpdatePolicy),
+			LatestVersion:            nullString(settings.LatestVersion),
+			UpdateURL:                nullString(settings.UpdateUrl),
+			ServerTime:               formatTime(now),
+		})
+		return
+	}
+	processingCompleted := false
+	defer func() {
+		if !processingCompleted {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			h.abandonClientReportProcessing(cleanupCtx, event)
+		}
+	}()
+
 	trackedStatus := ""
 	trackedDescription := ""
 	trackedCurrentStart := employee.CurrentSegmentStartedAt
@@ -232,14 +292,12 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := r.Context()
-	ipAddress := clientIP(r)
 	workEndAccepted := false
 	var workEndErr error
 
 	if reportType == "work_end" {
 		if trackedAvailable && now.After(trackedLastEnd.Time) && trackedStatus != "" {
-			h.addDailyStatsByRange(ctx, employee.ID, trackedStatus, trackedLastEnd.Time, now)
+			h.addDailyStatsByRangeForEvent(ctx, eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, trackedStatus, trackedLastEnd.Time, now)
 		}
 
 		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(ctx, employee.ID, employee.DepartmentID, payload, now)
@@ -251,7 +309,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 			if eventStatus == "" {
 				eventStatus = status
 			}
-			h.createSparseRawEvent(ctx, employee.ID, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, eventStatus, payload.ClientVersion, ipAddress)
+			h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, eventStatus, payload.ClientVersion, ipAddress)
 			h.clearEmployeeTrackingStateByContext(ctx, employee.ID, now)
 		} else {
 			if trackedAvailable {
@@ -263,10 +321,10 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if !trackedAvailable || trackedStatus == "" {
 			h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, status, description, sql.NullTime{Time: now, Valid: true}, sql.NullTime{Time: now, Valid: true})
-			h.createSparseRawEvent(ctx, employee.ID, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
+			h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
 		} else {
 			if now.After(trackedLastEnd.Time) {
-				h.addDailyStatsByRange(ctx, employee.ID, trackedStatus, trackedLastEnd.Time, now)
+				h.addDailyStatsByRangeForEvent(ctx, eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, trackedStatus, trackedLastEnd.Time, now)
 			}
 
 			statusChanged := trackedStatus != status
@@ -276,7 +334,7 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 					h.createTrackedSegmentOnlyByContext(ctx, employee.ID, trackedCurrentStart.Time, now, trackedStatus, trackedDescription, sourceForTrackedStatus(trackedStatus))
 				}
 				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, status, description, sql.NullTime{Time: now, Valid: true}, sql.NullTime{Time: now, Valid: true})
-				h.createSparseRawEvent(ctx, employee.ID, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
+				h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
 			} else {
 				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, trackedStatus, trackedDescription, trackedCurrentStart, sql.NullTime{Time: now, Valid: true})
 			}
@@ -307,6 +365,12 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		},
 		Time: formatTime(now),
 	})
+
+	if err := h.completeClientReportProcessing(ctx, event); err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	processingCompleted = true
 
 	if workEndErr != nil {
 		if typed, ok := workEndErr.(*workEndError); ok {
@@ -369,12 +433,19 @@ func (h *Handler) clearEmployeeTrackingStateByContext(ctx context.Context, emplo
 }
 
 func (h *Handler) createSparseRawEvent(ctx context.Context, employeeID int64, at time.Time, processName string, windowTitle string, idleSeconds int32, status string, clientVersion string, ipAddress string) {
+	h.createSparseRawEventForEvent(ctx, clientReportIngestEvent{EmployeeID: employeeID}, at, processName, windowTitle, idleSeconds, status, clientVersion, ipAddress)
+}
+
+func (h *Handler) createSparseRawEventForEvent(ctx context.Context, event clientReportIngestEvent, at time.Time, processName string, windowTitle string, idleSeconds int32, status string, clientVersion string, ipAddress string) {
 	status = strings.TrimSpace(status)
 	if status == "" {
 		return
 	}
 	_ = h.Queries.CreateRawEvent(ctx, sqlc.CreateRawEventParams{
-		EmployeeID:    employeeID,
+		IngestID:      toNullString(event.IngestID),
+		SourceEventID: toNullString(event.SourceEventID),
+		ClientEventID: toNullString(event.ClientEventID),
+		EmployeeID:    event.EmployeeID,
 		ReceivedAt:    at,
 		ProcessName:   toNullString(processName),
 		WindowTitle:   toNullString(windowTitle),
@@ -528,8 +599,18 @@ func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID
 }
 
 func (h *Handler) addDailyStatsByRange(ctx context.Context, employeeID int64, status string, start time.Time, end time.Time) {
+	h.addDailyStatsByRangeForEvent(ctx, "", "", "", employeeID, status, start, end)
+}
+
+func (h *Handler) addDailyStatsByRangeForEvent(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, status string, start time.Time, end time.Time) {
 	for _, part := range splitByDay(start, end) {
 		increments := buildDailyStatIncrement(status, part.Seconds)
+		if strings.TrimSpace(eventKey) != "" && h.DB != nil {
+			applied, err := h.insertStatDelta(ctx, eventKey, ingestID, sourceEventID, employeeID, part.Date, increments)
+			if err != nil || !applied {
+				continue
+			}
+		}
 		_ = h.Queries.AddDailyStats(ctx, sqlc.AddDailyStatsParams{
 			StatDate:          part.Date,
 			EmployeeID:        employeeID,

@@ -8,7 +8,6 @@ package sqlc
 import (
 	"context"
 	"database/sql"
-	"time"
 )
 
 const getEmployeeByCode = `-- name: GetEmployeeByCode :one
@@ -18,24 +17,9 @@ WHERE employee_code = ?
 LIMIT 1
 `
 
-type GetEmployeeByCodeRow struct {
-	ID                      int64                   `json:"id"`
-	EmployeeCode            string                  `json:"employee_code"`
-	Name                    string                  `json:"name"`
-	DepartmentID            sql.NullInt64           `json:"department_id"`
-	FingerprintHash         sql.NullString          `json:"fingerprint_hash"`
-	Enabled                 bool                    `json:"enabled"`
-	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
-	LastStatus              NullEmployeesLastStatus `json:"last_status"`
-	LastDescription         sql.NullString          `json:"last_description"`
-	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
-	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
-	CreatedAt               time.Time               `json:"created_at"`
-}
-
-func (q *Queries) GetEmployeeByCode(ctx context.Context, employeeCode string) (GetEmployeeByCodeRow, error) {
+func (q *Queries) GetEmployeeByCode(ctx context.Context, employeeCode string) (Employee, error) {
 	row := q.db.QueryRowContext(ctx, getEmployeeByCode, employeeCode)
-	var i GetEmployeeByCodeRow
+	var i Employee
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeCode,
@@ -60,24 +44,9 @@ WHERE id = ?
 LIMIT 1
 `
 
-type GetEmployeeByIDRow struct {
-	ID                      int64                   `json:"id"`
-	EmployeeCode            string                  `json:"employee_code"`
-	Name                    string                  `json:"name"`
-	DepartmentID            sql.NullInt64           `json:"department_id"`
-	FingerprintHash         sql.NullString          `json:"fingerprint_hash"`
-	Enabled                 bool                    `json:"enabled"`
-	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
-	LastStatus              NullEmployeesLastStatus `json:"last_status"`
-	LastDescription         sql.NullString          `json:"last_description"`
-	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
-	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
-	CreatedAt               time.Time               `json:"created_at"`
-}
-
-func (q *Queries) GetEmployeeByID(ctx context.Context, id int64) (GetEmployeeByIDRow, error) {
+func (q *Queries) GetEmployeeByID(ctx context.Context, id int64) (Employee, error) {
 	row := q.db.QueryRowContext(ctx, getEmployeeByID, id)
-	var i GetEmployeeByIDRow
+	var i Employee
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeCode,
@@ -146,30 +115,15 @@ WHERE enabled = 1
   AND last_seen_at IS NOT NULL
 `
 
-type ListEmployeesForOfflineRefreshRow struct {
-	ID                      int64                   `json:"id"`
-	EmployeeCode            string                  `json:"employee_code"`
-	Name                    string                  `json:"name"`
-	DepartmentID            sql.NullInt64           `json:"department_id"`
-	FingerprintHash         sql.NullString          `json:"fingerprint_hash"`
-	Enabled                 bool                    `json:"enabled"`
-	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
-	LastStatus              NullEmployeesLastStatus `json:"last_status"`
-	LastDescription         sql.NullString          `json:"last_description"`
-	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
-	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
-	CreatedAt               time.Time               `json:"created_at"`
-}
-
-func (q *Queries) ListEmployeesForOfflineRefresh(ctx context.Context) ([]ListEmployeesForOfflineRefreshRow, error) {
+func (q *Queries) ListEmployeesForOfflineRefresh(ctx context.Context) ([]Employee, error) {
 	rows, err := q.db.QueryContext(ctx, listEmployeesForOfflineRefresh)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListEmployeesForOfflineRefreshRow
+	var items []Employee
 	for rows.Next() {
-		var i ListEmployeesForOfflineRefreshRow
+		var i Employee
 		if err := rows.Scan(
 			&i.ID,
 			&i.EmployeeCode,

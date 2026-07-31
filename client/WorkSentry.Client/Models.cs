@@ -52,6 +52,7 @@ internal sealed class ClientReportRequest
     public int IdleSeconds { get; set; }
     public string ClientVersion { get; set; } = "";
     public string ReportType { get; set; } = "";
+    public string ClientEventId { get; set; } = "";
     public ClientCheckoutPayload? Checkout { get; set; }
     public string Reason { get; set; } = "";
 }
@@ -112,4 +113,3 @@ internal sealed class ClientErrorReportResponse
 {
     public bool Accepted { get; set; }
 }
-

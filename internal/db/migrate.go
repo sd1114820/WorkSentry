@@ -22,6 +22,7 @@ var migrations = []Migration{
 	{Version: 4, Name: "department_rules", Run: migrate004DepartmentRules},
 	{Version: 5, Name: "perf_indexes", Run: migrate005PerfIndexes},
 	{Version: 6, Name: "storage_growth_optimization", Run: migrate006StorageGrowthOptimization},
+	{Version: 7, Name: "ingest_outbox", Run: migrate007IngestOutbox},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -172,6 +173,33 @@ func isMigrationAlreadyPresent(ctx context.Context, db *sql.DB, version int64) (
 		return allEnumValuesPresent(ctx, db,
 			enumCheck{Table: "employees", Column: "last_status", Value: "offline"},
 			enumCheck{Table: "raw_events", Column: "status", Value: "offline"},
+		)
+	case 7:
+		tablesReady, err := allTablesExist(ctx, db,
+			"client_report_outbox",
+			"processed_ingests",
+			"processed_source_events",
+			"stat_deltas",
+		)
+		if err != nil || !tablesReady {
+			return tablesReady, err
+		}
+		for _, column := range []string{"ingest_id", "source_event_id", "client_event_id"} {
+			columnReady, err := columnExists(ctx, db, "raw_events", column)
+			if err != nil || !columnReady {
+				return columnReady, err
+			}
+		}
+		return allIndexesExist(ctx, db,
+			indexCheck{Table: "client_report_outbox", Index: "idx_client_report_outbox_status_created"},
+			indexCheck{Table: "client_report_outbox", Index: "idx_client_report_outbox_employee_time"},
+			indexCheck{Table: "client_report_outbox", Index: "idx_client_report_outbox_source_event"},
+			indexCheck{Table: "processed_source_events", Index: "idx_processed_source_events_employee"},
+			indexCheck{Table: "stat_deltas", Index: "idx_stat_deltas_date_employee"},
+			indexCheck{Table: "stat_deltas", Index: "idx_stat_deltas_ingest"},
+			indexCheck{Table: "stat_deltas", Index: "idx_stat_deltas_source_event"},
+			indexCheck{Table: "raw_events", Index: "idx_raw_events_ingest"},
+			indexCheck{Table: "raw_events", Index: "idx_raw_events_source_event"},
 		)
 	default:
 		return false, nil
@@ -469,6 +497,94 @@ func migrate006StorageGrowthOptimization(ctx context.Context, db *sql.DB) error 
 	}
 	if err := ensureIndex(ctx, db, "raw_events", "idx_raw_events_received_at", `ALTER TABLE raw_events ADD INDEX idx_raw_events_received_at (received_at, id)`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func migrate007IngestOutbox(ctx context.Context, db *sql.DB) error {
+	if err := execStatements(ctx, db,
+		`CREATE TABLE IF NOT EXISTS client_report_outbox (
+  ingest_id CHAR(36) PRIMARY KEY,
+  source_event_id VARCHAR(128) NULL,
+  client_event_id VARCHAR(128) NULL,
+  employee_id BIGINT NOT NULL,
+  received_at DATETIME NOT NULL,
+  payload_json JSON NOT NULL,
+  mq_status ENUM('pending','published','failed') NOT NULL DEFAULT 'pending',
+  mq_attempts INT NOT NULL DEFAULT 0,
+  last_error TEXT NULL,
+  published_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_client_report_outbox_status_created (mq_status, created_at),
+  INDEX idx_client_report_outbox_employee_time (employee_id, received_at),
+  INDEX idx_client_report_outbox_source_event (source_event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS processed_ingests (
+  ingest_id CHAR(36) PRIMARY KEY,
+  processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS processed_source_events (
+  source_event_id VARCHAR(128) PRIMARY KEY,
+  first_ingest_id CHAR(36) NOT NULL,
+  employee_id BIGINT NOT NULL,
+  client_event_id VARCHAR(128) NOT NULL,
+  processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_processed_source_events_employee (employee_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS stat_deltas (
+  event_key VARCHAR(128) PRIMARY KEY,
+  ingest_id CHAR(36) NOT NULL,
+  source_event_id VARCHAR(128) NULL,
+  stat_date DATE NOT NULL,
+  employee_id BIGINT NOT NULL,
+  work_seconds INT NOT NULL DEFAULT 0,
+  normal_seconds INT NOT NULL DEFAULT 0,
+  fish_seconds INT NOT NULL DEFAULT 0,
+  idle_seconds INT NOT NULL DEFAULT 0,
+  offline_seconds INT NOT NULL DEFAULT 0,
+  attendance_seconds INT NOT NULL DEFAULT 0,
+  effective_seconds INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_stat_deltas_date_employee (stat_date, employee_id),
+  INDEX idx_stat_deltas_ingest (ingest_id),
+  INDEX idx_stat_deltas_source_event (source_event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+	); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "raw_events", "ingest_id", `ALTER TABLE raw_events ADD COLUMN ingest_id CHAR(36) NULL AFTER id`); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "raw_events", "source_event_id", `ALTER TABLE raw_events ADD COLUMN source_event_id VARCHAR(128) NULL AFTER ingest_id`); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "raw_events", "client_event_id", `ALTER TABLE raw_events ADD COLUMN client_event_id VARCHAR(128) NULL AFTER source_event_id`); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "raw_events", "idx_raw_events_ingest", `ALTER TABLE raw_events ADD INDEX idx_raw_events_ingest (ingest_id)`); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, db, "raw_events", "idx_raw_events_source_event", `ALTER TABLE raw_events ADD INDEX idx_raw_events_source_event (source_event_id)`); err != nil {
+		return err
+	}
+	indexes := []struct {
+		table     string
+		index     string
+		statement string
+	}{
+		{"client_report_outbox", "idx_client_report_outbox_status_created", `ALTER TABLE client_report_outbox ADD INDEX idx_client_report_outbox_status_created (mq_status, created_at)`},
+		{"client_report_outbox", "idx_client_report_outbox_employee_time", `ALTER TABLE client_report_outbox ADD INDEX idx_client_report_outbox_employee_time (employee_id, received_at)`},
+		{"client_report_outbox", "idx_client_report_outbox_source_event", `ALTER TABLE client_report_outbox ADD INDEX idx_client_report_outbox_source_event (source_event_id)`},
+		{"processed_source_events", "idx_processed_source_events_employee", `ALTER TABLE processed_source_events ADD INDEX idx_processed_source_events_employee (employee_id)`},
+		{"stat_deltas", "idx_stat_deltas_date_employee", `ALTER TABLE stat_deltas ADD INDEX idx_stat_deltas_date_employee (stat_date, employee_id)`},
+		{"stat_deltas", "idx_stat_deltas_ingest", `ALTER TABLE stat_deltas ADD INDEX idx_stat_deltas_ingest (ingest_id)`},
+		{"stat_deltas", "idx_stat_deltas_source_event", `ALTER TABLE stat_deltas ADD INDEX idx_stat_deltas_source_event (source_event_id)`},
+	}
+	for _, index := range indexes {
+		if err := ensureIndex(ctx, db, index.table, index.index, index.statement); err != nil {
+			return err
+		}
 	}
 	return nil
 }

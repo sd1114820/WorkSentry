@@ -55,6 +55,49 @@ func (ns NullCheckoutFieldsType) Value() (driver.Value, error) {
 	return string(ns.CheckoutFieldsType), nil
 }
 
+type ClientReportOutboxMqStatus string
+
+const (
+	ClientReportOutboxMqStatusPending   ClientReportOutboxMqStatus = "pending"
+	ClientReportOutboxMqStatusPublished ClientReportOutboxMqStatus = "published"
+	ClientReportOutboxMqStatusFailed    ClientReportOutboxMqStatus = "failed"
+)
+
+func (e *ClientReportOutboxMqStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ClientReportOutboxMqStatus(s)
+	case string:
+		*e = ClientReportOutboxMqStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ClientReportOutboxMqStatus: %T", src)
+	}
+	return nil
+}
+
+type NullClientReportOutboxMqStatus struct {
+	ClientReportOutboxMqStatus ClientReportOutboxMqStatus `json:"client_report_outbox_mq_status"`
+	Valid                      bool                       `json:"valid"` // Valid is true if ClientReportOutboxMqStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullClientReportOutboxMqStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ClientReportOutboxMqStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ClientReportOutboxMqStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullClientReportOutboxMqStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ClientReportOutboxMqStatus), nil
+}
+
 type DepartmentStatusThresholdsTriggerAction string
 
 const (
@@ -455,6 +498,21 @@ type CheckoutTemplate struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type ClientReportOutbox struct {
+	IngestID      string                     `json:"ingest_id"`
+	SourceEventID sql.NullString             `json:"source_event_id"`
+	ClientEventID sql.NullString             `json:"client_event_id"`
+	EmployeeID    int64                      `json:"employee_id"`
+	ReceivedAt    time.Time                  `json:"received_at"`
+	PayloadJson   json.RawMessage            `json:"payload_json"`
+	MqStatus      ClientReportOutboxMqStatus `json:"mq_status"`
+	MqAttempts    int32                      `json:"mq_attempts"`
+	LastError     sql.NullString             `json:"last_error"`
+	PublishedAt   sql.NullTime               `json:"published_at"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	UpdatedAt     time.Time                  `json:"updated_at"`
+}
+
 type ClientToken struct {
 	Token      string       `json:"token"`
 	EmployeeID int64        `json:"employee_id"`
@@ -514,11 +572,11 @@ type Employee struct {
 	FingerprintHash         sql.NullString          `json:"fingerprint_hash"`
 	Enabled                 bool                    `json:"enabled"`
 	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
+	LastStatus              NullEmployeesLastStatus `json:"last_status"`
 	LastDescription         sql.NullString          `json:"last_description"`
+	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
 	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
 	CreatedAt               time.Time               `json:"created_at"`
-	LastStatus              NullEmployeesLastStatus `json:"last_status"`
-	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
 }
 
 type ManualAdjustment struct {
@@ -534,16 +592,32 @@ type ManualAdjustment struct {
 	UpdatedAt  time.Time               `json:"updated_at"`
 }
 
+type ProcessedIngest struct {
+	IngestID    string    `json:"ingest_id"`
+	ProcessedAt time.Time `json:"processed_at"`
+}
+
+type ProcessedSourceEvent struct {
+	SourceEventID string    `json:"source_event_id"`
+	FirstIngestID string    `json:"first_ingest_id"`
+	EmployeeID    int64     `json:"employee_id"`
+	ClientEventID string    `json:"client_event_id"`
+	ProcessedAt   time.Time `json:"processed_at"`
+}
+
 type RawEvent struct {
 	ID            int64           `json:"id"`
+	IngestID      sql.NullString  `json:"ingest_id"`
+	SourceEventID sql.NullString  `json:"source_event_id"`
+	ClientEventID sql.NullString  `json:"client_event_id"`
 	EmployeeID    int64           `json:"employee_id"`
 	ReceivedAt    time.Time       `json:"received_at"`
 	ProcessName   sql.NullString  `json:"process_name"`
 	WindowTitle   sql.NullString  `json:"window_title"`
 	IdleSeconds   int32           `json:"idle_seconds"`
+	Status        RawEventsStatus `json:"status"`
 	ClientVersion sql.NullString  `json:"client_version"`
 	IpAddress     sql.NullString  `json:"ip_address"`
-	Status        RawEventsStatus `json:"status"`
 }
 
 type Rule struct {
@@ -557,6 +631,12 @@ type Rule struct {
 	UpdatedAt  time.Time      `json:"updated_at"`
 }
 
+type SchemaMigration struct {
+	Version   int64     `json:"version"`
+	Name      string    `json:"name"`
+	AppliedAt time.Time `json:"applied_at"`
+}
+
 type Setting struct {
 	ID                       int8           `json:"id"`
 	IdleThresholdSeconds     int32          `json:"idle_threshold_seconds"`
@@ -567,6 +647,22 @@ type Setting struct {
 	LatestVersion            sql.NullString `json:"latest_version"`
 	UpdateUrl                sql.NullString `json:"update_url"`
 	UpdatedAt                time.Time      `json:"updated_at"`
+}
+
+type StatDelta struct {
+	EventKey          string         `json:"event_key"`
+	IngestID          string         `json:"ingest_id"`
+	SourceEventID     sql.NullString `json:"source_event_id"`
+	StatDate          time.Time      `json:"stat_date"`
+	EmployeeID        int64          `json:"employee_id"`
+	WorkSeconds       int32          `json:"work_seconds"`
+	NormalSeconds     int32          `json:"normal_seconds"`
+	FishSeconds       int32          `json:"fish_seconds"`
+	IdleSeconds       int32          `json:"idle_seconds"`
+	OfflineSeconds    int32          `json:"offline_seconds"`
+	AttendanceSeconds int32          `json:"attendance_seconds"`
+	EffectiveSeconds  int32          `json:"effective_seconds"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 type SystemIncident struct {
@@ -583,10 +679,10 @@ type TimeSegment struct {
 	EmployeeID  int64              `json:"employee_id"`
 	StartAt     time.Time          `json:"start_at"`
 	EndAt       time.Time          `json:"end_at"`
+	Status      TimeSegmentsStatus `json:"status"`
 	Description sql.NullString     `json:"description"`
 	Source      TimeSegmentsSource `json:"source"`
 	CreatedAt   time.Time          `json:"created_at"`
-	Status      TimeSegmentsStatus `json:"status"`
 }
 
 type WorkSession struct {

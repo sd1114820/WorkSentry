@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
+	MQ       MQConfig       `yaml:"mq"`
 	App      AppConfig      `yaml:"app"`
 }
 
@@ -23,6 +24,14 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	DSN                    string `yaml:"dsn"`
 	RawEventsRetentionDays int    `yaml:"raw_events_retention_days"`
+}
+
+type MQConfig struct {
+	Enabled             bool     `yaml:"enabled"`
+	Provider            string   `yaml:"provider"`
+	Brokers             []string `yaml:"brokers"`
+	Topic               string   `yaml:"topic"`
+	WriteTimeoutSeconds int      `yaml:"write_timeout_seconds"`
 }
 
 type AppConfig struct {
@@ -72,6 +81,12 @@ func defaultConfig() Config {
 		},
 		Database: DatabaseConfig{
 			RawEventsRetentionDays: 3,
+		},
+		MQ: MQConfig{
+			Enabled:             false,
+			Provider:            "kafka",
+			Topic:               "worksentry.client.reports",
+			WriteTimeoutSeconds: 3,
 		},
 		App: AppConfig{
 			Timezone:    "Asia/Shanghai",

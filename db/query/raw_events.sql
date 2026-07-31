@@ -1,5 +1,8 @@
 -- name: CreateRawEvent :exec
 INSERT INTO raw_events (
+  ingest_id,
+  source_event_id,
+  client_event_id,
   employee_id,
   received_at,
   process_name,
@@ -8,7 +11,7 @@ INSERT INTO raw_events (
   status,
   client_version,
   ip_address
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetLastRawEventByEmployee :one
 SELECT id, employee_id, received_at, process_name, window_title, idle_seconds, status, client_version, ip_address

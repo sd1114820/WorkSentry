@@ -13,6 +13,9 @@ import (
 
 const createRawEvent = `-- name: CreateRawEvent :exec
 INSERT INTO raw_events (
+  ingest_id,
+  source_event_id,
+  client_event_id,
   employee_id,
   received_at,
   process_name,
@@ -21,10 +24,13 @@ INSERT INTO raw_events (
   status,
   client_version,
   ip_address
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateRawEventParams struct {
+	IngestID      sql.NullString  `json:"ingest_id"`
+	SourceEventID sql.NullString  `json:"source_event_id"`
+	ClientEventID sql.NullString  `json:"client_event_id"`
 	EmployeeID    int64           `json:"employee_id"`
 	ReceivedAt    time.Time       `json:"received_at"`
 	ProcessName   sql.NullString  `json:"process_name"`
@@ -37,6 +43,9 @@ type CreateRawEventParams struct {
 
 func (q *Queries) CreateRawEvent(ctx context.Context, arg CreateRawEventParams) error {
 	_, err := q.db.ExecContext(ctx, createRawEvent,
+		arg.IngestID,
+		arg.SourceEventID,
+		arg.ClientEventID,
 		arg.EmployeeID,
 		arg.ReceivedAt,
 		arg.ProcessName,
