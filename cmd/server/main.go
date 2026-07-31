@@ -43,6 +43,10 @@ func main() {
 	}
 	defer sqlDB.Close()
 
+	if err := db.Migrate(context.Background(), sqlDB); err != nil {
+		log.Fatalf("数据库迁移失败: %v", err)
+	}
+
 	h := handlers.NewHandler(cfg, sqlDB)
 	defer h.MQ.Close()
 	ctx, cancel := context.WithCancel(context.Background())

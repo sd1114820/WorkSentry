@@ -11,7 +11,7 @@ import (
 )
 
 const getEmployeeByCode = `-- name: GetEmployeeByCode :one
-SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, last_segment_end_at, created_at
+SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, current_segment_started_at, last_segment_end_at, created_at
 FROM employees
 WHERE employee_code = ?
 LIMIT 1
@@ -30,6 +30,7 @@ func (q *Queries) GetEmployeeByCode(ctx context.Context, employeeCode string) (E
 		&i.LastSeenAt,
 		&i.LastStatus,
 		&i.LastDescription,
+		&i.CurrentSegmentStartedAt,
 		&i.LastSegmentEndAt,
 		&i.CreatedAt,
 	)
@@ -37,7 +38,7 @@ func (q *Queries) GetEmployeeByCode(ctx context.Context, employeeCode string) (E
 }
 
 const getEmployeeByID = `-- name: GetEmployeeByID :one
-SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, last_segment_end_at, created_at
+SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, current_segment_started_at, last_segment_end_at, created_at
 FROM employees
 WHERE id = ?
 LIMIT 1
@@ -56,6 +57,7 @@ func (q *Queries) GetEmployeeByID(ctx context.Context, id int64) (Employee, erro
 		&i.LastSeenAt,
 		&i.LastStatus,
 		&i.LastDescription,
+		&i.CurrentSegmentStartedAt,
 		&i.LastSegmentEndAt,
 		&i.CreatedAt,
 	)
@@ -107,7 +109,7 @@ func (q *Queries) ListEmployees(ctx context.Context) ([]ListEmployeesRow, error)
 }
 
 const listEmployeesForOfflineRefresh = `-- name: ListEmployeesForOfflineRefresh :many
-SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, last_segment_end_at, created_at
+SELECT id, employee_code, name, department_id, fingerprint_hash, enabled, last_seen_at, last_status, last_description, current_segment_started_at, last_segment_end_at, created_at
 FROM employees
 WHERE enabled = 1
   AND last_seen_at IS NOT NULL
@@ -132,6 +134,7 @@ func (q *Queries) ListEmployeesForOfflineRefresh(ctx context.Context) ([]Employe
 			&i.LastSeenAt,
 			&i.LastStatus,
 			&i.LastDescription,
+			&i.CurrentSegmentStartedAt,
 			&i.LastSegmentEndAt,
 			&i.CreatedAt,
 		); err != nil {
@@ -164,41 +167,33 @@ func (q *Queries) UpdateEmployeeFingerprint(ctx context.Context, arg UpdateEmplo
 	return err
 }
 
-const updateEmployeeLastSeen = `-- name: UpdateEmployeeLastSeen :exec
+const updateEmployeeTrackingState = `-- name: UpdateEmployeeTrackingState :exec
 UPDATE employees
-SET last_seen_at = ?, last_status = ?, last_description = ?
+SET last_seen_at = ?,
+    last_status = ?,
+    last_description = ?,
+    current_segment_started_at = ?,
+    last_segment_end_at = ?
 WHERE id = ?
 `
 
-type UpdateEmployeeLastSeenParams struct {
-	LastSeenAt      sql.NullTime            `json:"last_seen_at"`
-	LastStatus      NullEmployeesLastStatus `json:"last_status"`
-	LastDescription sql.NullString          `json:"last_description"`
-	ID              int64                   `json:"id"`
+type UpdateEmployeeTrackingStateParams struct {
+	LastSeenAt              sql.NullTime            `json:"last_seen_at"`
+	LastStatus              NullEmployeesLastStatus `json:"last_status"`
+	LastDescription         sql.NullString          `json:"last_description"`
+	CurrentSegmentStartedAt sql.NullTime            `json:"current_segment_started_at"`
+	LastSegmentEndAt        sql.NullTime            `json:"last_segment_end_at"`
+	ID                      int64                   `json:"id"`
 }
 
-func (q *Queries) UpdateEmployeeLastSeen(ctx context.Context, arg UpdateEmployeeLastSeenParams) error {
-	_, err := q.db.ExecContext(ctx, updateEmployeeLastSeen,
+func (q *Queries) UpdateEmployeeTrackingState(ctx context.Context, arg UpdateEmployeeTrackingStateParams) error {
+	_, err := q.db.ExecContext(ctx, updateEmployeeTrackingState,
 		arg.LastSeenAt,
 		arg.LastStatus,
 		arg.LastDescription,
+		arg.CurrentSegmentStartedAt,
+		arg.LastSegmentEndAt,
 		arg.ID,
 	)
-	return err
-}
-
-const updateEmployeeLastSegmentEnd = `-- name: UpdateEmployeeLastSegmentEnd :exec
-UPDATE employees
-SET last_segment_end_at = ?
-WHERE id = ?
-`
-
-type UpdateEmployeeLastSegmentEndParams struct {
-	LastSegmentEndAt sql.NullTime `json:"last_segment_end_at"`
-	ID               int64        `json:"id"`
-}
-
-func (q *Queries) UpdateEmployeeLastSegmentEnd(ctx context.Context, arg UpdateEmployeeLastSegmentEndParams) error {
-	_, err := q.db.ExecContext(ctx, updateEmployeeLastSegmentEnd, arg.LastSegmentEndAt, arg.ID)
 	return err
 }

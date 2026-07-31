@@ -311,7 +311,7 @@ internal sealed class TrayManager : IDisposable
                     : startResult.Error!;
                 InvokeOnUi(() =>
                 {
-                    var message = LanguageService.Format("MsgWorkStartFailedWithReason", reason);
+                    var message = AppendDiagnosticHint(LanguageService.Format("MsgWorkStartFailedWithReason", reason));
                     System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     if (startResult.FocusEmployeeCode)
                     {
@@ -382,7 +382,7 @@ internal sealed class TrayManager : IDisposable
                     : templateResult.Error!;
                 InvokeOnUi(() =>
                 {
-                    var message = LanguageService.Format("MsgCheckoutTemplateFailedWithReason", reason);
+                    var message = AppendDiagnosticHint(LanguageService.Format("MsgCheckoutTemplateFailedWithReason", reason));
                     System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     if (templateResult.FocusEmployeeCode)
                     {
@@ -445,7 +445,7 @@ internal sealed class TrayManager : IDisposable
                     var reason = string.IsNullOrWhiteSpace(stopResult.Error)
                         ? LanguageService.GetString("ErrServerError")
                         : stopResult.Error!;
-                    var message = LanguageService.Format("MsgWorkEndFailedWithReason", reason);
+                    var message = AppendDiagnosticHint(LanguageService.Format("MsgWorkEndFailedWithReason", reason));
                     System.Windows.MessageBox.Show(message, LanguageService.GetString("DialogTitleTip"), MessageBoxButton.OK, MessageBoxImage.Warning);
                 });
                 return false;
@@ -559,6 +559,19 @@ internal sealed class TrayManager : IDisposable
         _reportManager.SettingsChanged += config =>
         {
             InvokeOnUi(() => _mainWindow.UpdateUpdateInfo(config.UpdatePolicy, config.LatestVersion));
+        };
+        _reportManager.DiagnosticChanged += diagnostic =>
+        {
+            InvokeOnUi(() =>
+            {
+                if (diagnostic == null)
+                {
+                    _mainWindow.ClearNetworkDiagnostic();
+                    return;
+                }
+
+                _mainWindow.ShowNetworkDiagnostic(diagnostic);
+            });
         };
     }
 
@@ -744,6 +757,15 @@ internal sealed class TrayManager : IDisposable
         _notifyIcon.ShowBalloonTip(timeout, title, message, Forms.ToolTipIcon.Info);
     }
 
+    private string AppendDiagnosticHint(string message)
+    {
+        if (_reportManager?.LatestDiagnostic == null)
+        {
+            return message;
+        }
+
+        return message + Environment.NewLine + Environment.NewLine + LanguageService.GetString("MsgDiagnosticOpenMain");
+    }
     private void OpenUrl(string url)
     {
         try
@@ -793,3 +815,8 @@ internal sealed class TrayManager : IDisposable
         System.Windows.Application.Current.Shutdown();
     }
 }
+
+
+
+
+

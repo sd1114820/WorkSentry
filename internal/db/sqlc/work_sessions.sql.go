@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+const closeWorkSession = `-- name: CloseWorkSession :exec
+UPDATE work_sessions
+SET end_at = ?, updated_at = CURRENT_TIMESTAMP
+WHERE employee_id = ?
+  AND end_at IS NULL
+ORDER BY start_at DESC
+LIMIT 1
+`
+
+type CloseWorkSessionParams struct {
+	EndAt      sql.NullTime `json:"end_at"`
+	EmployeeID int64        `json:"employee_id"`
+}
+
+func (q *Queries) CloseWorkSession(ctx context.Context, arg CloseWorkSessionParams) error {
+	_, err := q.db.ExecContext(ctx, closeWorkSession, arg.EndAt, arg.EmployeeID)
+	return err
+}
+
 const createWorkSession = `-- name: CreateWorkSession :exec
 INSERT INTO work_sessions (
   employee_id,
@@ -25,32 +44,7 @@ type CreateWorkSessionParams struct {
 }
 
 func (q *Queries) CreateWorkSession(ctx context.Context, arg CreateWorkSessionParams) error {
-	_, err := q.db.ExecContext(ctx, createWorkSession,
-		arg.EmployeeID,
-		arg.StartAt,
-	)
-	return err
-}
-
-const closeWorkSession = `-- name: CloseWorkSession :exec
-UPDATE work_sessions
-SET end_at = ?, updated_at = CURRENT_TIMESTAMP
-WHERE employee_id = ?
-  AND end_at IS NULL
-ORDER BY start_at DESC
-LIMIT 1
-`
-
-type CloseWorkSessionParams struct {
-	EndAt      time.Time `json:"end_at"`
-	EmployeeID int64     `json:"employee_id"`
-}
-
-func (q *Queries) CloseWorkSession(ctx context.Context, arg CloseWorkSessionParams) error {
-	_, err := q.db.ExecContext(ctx, closeWorkSession,
-		arg.EndAt,
-		arg.EmployeeID,
-	)
+	_, err := q.db.ExecContext(ctx, createWorkSession, arg.EmployeeID, arg.StartAt)
 	return err
 }
 
@@ -76,5 +70,3 @@ func (q *Queries) GetOpenWorkSessionByEmployee(ctx context.Context, employeeID i
 	)
 	return i, err
 }
-
-var _ = sql.ErrNoRows

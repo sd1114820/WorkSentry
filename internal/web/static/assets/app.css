@@ -578,6 +578,7 @@ button, input, select, textarea {
 .table-row.cols-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 .table-row.cols-9 { grid-template-columns: repeat(9, minmax(0, 1fr)); }
 .table-row.cols-10 { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+.table-row.cols-11 { grid-template-columns: repeat(11, minmax(0, 1fr)); }
 
 .table-section-title {
   font-size: 14px;

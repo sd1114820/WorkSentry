@@ -188,14 +188,20 @@
                     </StackPanel>
                 </Border>
 
-                <Grid Grid.Row="1" Margin="32,24">
+                <Grid Grid.Row="1" Margin="28,20">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="7*" />
                         <ColumnDefinition Width="5*" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Margin="0,0,24,0">
-                        <Border x:Name="StatusCard" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" CornerRadius="10" Padding="20" Margin="0,0,0,16">
+                    <Grid Grid.Column="0" Margin="0,0,20,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="StatusCard" Grid.Row="0" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" CornerRadius="10" Padding="18" Margin="0,0,0,12">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -203,14 +209,14 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="{DynamicResource StatusLabel}" FontSize="12" Foreground="#2563EB" FontWeight="Bold" />
-                                    <TextBlock x:Name="StatusValueText" Text="{DynamicResource StatusIdle}" FontSize="36" FontWeight="Bold" Foreground="#1F2937" Margin="0,8,0,0" />
+                                    <TextBlock x:Name="StatusValueText" Text="{DynamicResource StatusIdle}" FontSize="34" FontWeight="Bold" Foreground="#1F2937" Margin="0,6,0,0" />
                                 </StackPanel>
-                                <TextBlock x:Name="StatusIconText" Grid.Column="1" Text="●" FontSize="48" Foreground="#BFDBFE" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                <TextBlock x:Name="StatusIconText" Grid.Column="1" Text="●" FontSize="44" Foreground="#BFDBFE" VerticalAlignment="Center" Margin="12,0,0,0" />
                             </Grid>
                         </Border>
 
-                        <Grid>
-                            <Border BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6" Padding="20">
+                        <Grid Grid.Row="1" Margin="0,0,0,12">
+                            <Border BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="6" Padding="18">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
@@ -223,7 +229,7 @@
 
                                     <StackPanel Grid.Row="0" Grid.Column="0">
                                         <TextBlock Text="{DynamicResource LastReportLabel}" FontSize="12" Foreground="#9CA3AF" />
-                                        <TextBlock x:Name="LastReportText" Text="{DynamicResource LastReportPlaceholder}" FontSize="16" Foreground="#374151" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                        <TextBlock x:Name="LastReportText" Text="{DynamicResource LastReportPlaceholder}" FontSize="15" Foreground="#374151" FontWeight="SemiBold" Margin="0,4,0,0" />
                                     </StackPanel>
 
                                     <StackPanel Grid.Row="0" Grid.Column="1">
@@ -233,7 +239,7 @@
                                         </Border>
                                     </StackPanel>
 
-                                    <Border Grid.Row="1" Grid.ColumnSpan="2" BorderBrush="#F3F4F6" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,12,0,0">
+                                    <Border Grid.Row="1" Grid.ColumnSpan="2" BorderBrush="#F3F4F6" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,10,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -255,7 +261,42 @@
                                 <TextBlock Text="{DynamicResource MonitorInfoTitle}" FontSize="12" Foreground="#6B7280" FontWeight="SemiBold" />
                             </Border>
                         </Grid>
-                    </StackPanel>
+
+                        <Border x:Name="DiagnosticCard" Grid.Row="2" BorderBrush="#FED7AA" BorderThickness="1" CornerRadius="10" Padding="12,10" Background="#FFF7ED" Visibility="Collapsed" MinHeight="0" ClipToBounds="True">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{DynamicResource DiagnosticTitle}" FontSize="11" Foreground="#C2410C" FontWeight="Bold" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="DiagnosticCopyStatusText" FontSize="10" Foreground="#9A3412" Margin="6,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <Button x:Name="CopyDiagnosticButton" Grid.Column="1" Content="{DynamicResource DiagnosticCopyButton}" Style="{StaticResource OutlineButton}" Padding="12,4" MinWidth="88" Height="30" Margin="10,0,0,0" />
+                                </Grid>
+                                <TextBlock x:Name="DiagnosticSummaryText" Grid.Row="1" FontSize="15" FontWeight="SemiBold" Foreground="#9A3412" Margin="0,6,0,0" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                <Grid Grid.Row="2" Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource DiagnosticCauseLabel}" FontSize="10" Foreground="#9A3412" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="DiagnosticCauseText" Grid.Column="1" FontSize="11" Foreground="#7C2D12" Margin="6,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                                <StackPanel Grid.Row="3" Margin="0,6,0,0">
+                                    <TextBlock x:Name="DiagnosticDetailText" FontSize="10" Foreground="#9A3412" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                    <TextBlock Text="{DynamicResource DiagnosticHint}" FontSize="10" Foreground="#9A3412" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
 
                     <StackPanel Grid.Column="1">
                         <Grid>

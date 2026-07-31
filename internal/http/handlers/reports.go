@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ type DailyReportView struct {
 	EmployeeCode       string `json:"employeeCode"`
 	Name               string `json:"name"`
 	Department         string `json:"department"`
+	OnDutyDuration     string `json:"onDutyDuration"`
 	WorkDuration       string `json:"workDuration"`
 	NormalDuration     string `json:"normalDuration"`
 	FishDuration       string `json:"fishDuration"`
@@ -72,11 +74,7 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), sqlc.ListDailyStatsByDateParams{
-		StatDate:     date,
-		Column2:      departmentID,
-		DepartmentID: toNullInt64(departmentID),
-	})
+	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, departmentID))
 	if err != nil {
 		log.Printf("读取日报失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "读取报表失败")
@@ -85,14 +83,24 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]DailyReportView, 0, len(rows))
 	for _, row := range rows {
+		metrics := buildDailyReportMetrics(
+			int64(row.NormalSeconds),
+			int64(row.FishSeconds),
+			int64(row.IdleSeconds),
+			int64(row.OfflineSeconds),
+			int64(row.EffectiveSeconds),
+			row.BreakSeconds,
+			row.OnDutySeconds,
+		)
 		items = append(items, DailyReportView{
 			EmployeeCode:       row.EmployeeCode,
 			Name:               row.Name,
 			Department:         nullString(row.DepartmentName),
-			WorkDuration:       formatDuration(int64(row.WorkSeconds)),
+			OnDutyDuration:     formatDuration(metrics.OnDutySeconds),
+			WorkDuration:       formatDuration(metrics.WorkSeconds),
 			NormalDuration:     formatDuration(int64(row.NormalSeconds)),
 			FishDuration:       formatDuration(int64(row.FishSeconds)),
-			IdleDuration:       formatDuration(int64(row.IdleSeconds)),
+			IdleDuration:       formatDuration(metrics.IdleSeconds),
 			OfflineDuration:    formatDuration(int64(row.OfflineSeconds)),
 			AttendanceDuration: formatDuration(int64(row.AttendanceSeconds)),
 			EffectiveDuration:  formatDuration(int64(row.EffectiveSeconds)),
@@ -128,19 +136,18 @@ func (h *Handler) ReportTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
-	end := start.Add(24 * time.Hour)
+	dayStart, dayEnd, reportEnd := reportDayBounds(date)
 	segments, err := h.Queries.ListTimeSegmentsByEmployeeAndRange(r.Context(), sqlc.ListTimeSegmentsByEmployeeAndRangeParams{
 		EmployeeID: employee.ID,
-		StartAt:    end,
-		EndAt:      start,
+		StartAt:    dayEnd,
+		EndAt:      dayStart,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取时间轴失败")
 		return
 	}
 
-	items := make([]TimelineItem, 0, len(segments))
+	items := make([]TimelineItem, 0, len(segments)+1)
 	for _, seg := range segments {
 		statusCode := string(seg.Status)
 		items = append(items, TimelineItem{
@@ -152,6 +159,37 @@ func (h *Handler) ReportTimeline(w http.ResponseWriter, r *http.Request) {
 			Description: nullString(seg.Description),
 			SourceLabel: sourceLabel(string(seg.Source)),
 		})
+	}
+
+	if employee.CurrentSegmentStartedAt.Valid && employee.LastStatus.Valid {
+		if _, err := h.Queries.GetOpenWorkSessionByEmployee(r.Context(), employee.ID); err == nil {
+			segmentStart := employee.CurrentSegmentStartedAt.Time
+			segmentEnd := reportEnd
+			if employee.LastSegmentEndAt.Valid && employee.LastSegmentEndAt.Time.After(segmentEnd) {
+				segmentEnd = employee.LastSegmentEndAt.Time
+			}
+			if segmentEnd.After(dayEnd) {
+				segmentEnd = dayEnd
+			}
+			if segmentStart.Before(dayStart) {
+				segmentStart = dayStart
+			}
+			if segmentEnd.After(segmentStart) {
+				statusCode := string(employee.LastStatus.EmployeesLastStatus)
+				items = append(items, TimelineItem{
+					StatusLabel: statusLabel(statusCode),
+					StatusCode:  statusCode,
+					StartAt:     formatTime(segmentStart),
+					EndAt:       formatTime(segmentEnd),
+					Duration:    formatDuration(int64(segmentEnd.Sub(segmentStart).Seconds())),
+					Description: nullString(employee.LastDescription),
+					SourceLabel: sourceLabel(sourceForTrackedStatus(statusCode)),
+				})
+			}
+		} else if err != sql.ErrNoRows {
+			writeError(w, http.StatusInternalServerError, "读取时间轴失败")
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -175,11 +213,7 @@ func (h *Handler) ReportRank(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), sqlc.ListDailyStatsByDateParams{
-		StatDate:     date,
-		Column2:      int64(0),
-		DepartmentID: toNullInt64(0),
-	})
+	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, 0))
 	if err != nil {
 		log.Printf("读取团队排行失败: %v", err)
 		writeError(w, http.StatusInternalServerError, "读取排行失败")

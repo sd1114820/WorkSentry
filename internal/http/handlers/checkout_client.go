@@ -94,9 +94,9 @@ func (h *Handler) ClientCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 		snapshots = append(snapshots, CheckoutFieldSnapshot{
 			ID:       field.ID,
 			Name:     field.NameZh,
-			Type:     field.Type,
+			Type:     string(field.Type),
 			Required: field.Required,
-			Options:  parseOptions(field.OptionsZhJSON),
+			Options:  parseOptions(field.OptionsZhJson),
 		})
 	}
 

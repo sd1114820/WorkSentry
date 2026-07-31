@@ -1507,12 +1507,13 @@ async function loadDailyReport() {
 
 function renderDailyReport(items) {
   const container = document.getElementById('dailyReportTable');
-  const headers = ['工号', '姓名', '部门', '工作', '常规', '摸鱼', '离开', '离线', '在岗', '有效'];
+  const headers = ['工号', '姓名', '部门', '上班时长', '工作', '常规', '摸鱼', '离开', '离线', '在岗', '有效'];
   const rows = items.map((item) => [
-    '<div class="table-row cols-10">',
+    '<div class="table-row cols-11">',
     '<div>' + item.employeeCode + '</div>',
     '<div>' + item.name + '</div>',
     '<div>' + (item.department || '-') + '</div>',
+    '<div>' + item.onDutyDuration + '</div>',
     '<div>' + item.workDuration + '</div>',
     '<div>' + item.normalDuration + '</div>',
     '<div>' + item.fishDuration + '</div>',
@@ -1522,7 +1523,7 @@ function renderDailyReport(items) {
     '<div>' + item.effectiveDuration + '</div>',
     '</div>'
   ].join(''));
-  renderTable(container, headers, rows, 'cols-10');
+  renderTable(container, headers, rows, 'cols-11');
 }
 
 async function exportDaily() {
@@ -1549,7 +1550,7 @@ async function exportDaily() {
 
 async function exportEmployees() {
   try {
-    const blob = await fetchBlob('/api/v1/admin/exports/employees.xlsx');
+    const blob = await fetchBlob('/api/v1/admin/exports/employees.xlsx?enabledOnly=true');
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = '员工台账.xlsx';
@@ -3900,19 +3901,3 @@ if (authToken) {
 } else {
   showLogin();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

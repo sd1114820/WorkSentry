@@ -55,10 +55,7 @@ type ClientReportResponse struct {
 	ServerTime               string `json:"serverTime"`
 }
 
-const (
-	tokenLastSeenMinWriteInterval    = 15 * time.Second
-	employeeLastSeenMinWriteInterval = 15 * time.Second
-)
+const tokenLastSeenMinWriteInterval = 15 * time.Second
 
 func (h *Handler) ClientBind(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -216,7 +213,6 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rules := h.getEnabledRulesCached(r.Context())
-
 	status := determineStatus(payload.IdleSeconds, settings.IdleThresholdSeconds, payload.ProcessName, payload.WindowTitle, rules)
 	description := buildDescription(payload.ProcessName, payload.WindowTitle)
 	if reportType == "break" {
@@ -224,6 +220,8 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		description = "休息中"
 	}
 
+	ctx := r.Context()
+	ipAddress := clientIP(r)
 	ingestID, err := generateIngestID()
 	if err != nil {
 		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "生成上报流水失败")
@@ -241,16 +239,16 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		IdleSeconds:   payload.IdleSeconds,
 		Status:        status,
 		ClientVersion: strings.TrimSpace(payload.ClientVersion),
-		IPAddress:     clientIP(r),
+		IPAddress:     ipAddress,
 		ReportType:    reportType,
 		Reason:        strings.TrimSpace(payload.Reason),
 		Checkout:      payload.Checkout,
 	}
-	if err := h.acceptClientReportEvent(r.Context(), event); err != nil {
+	if err := h.acceptClientReportEvent(ctx, event); err != nil {
 		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_ingest_unavailable", "上报暂时不可用，请稍后重试")
 		return
 	}
-	duplicateEvent, err := h.beginClientReportProcessing(r.Context(), event)
+	duplicateEvent, err := h.beginClientReportProcessing(ctx, event)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
 		return
@@ -270,68 +268,77 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 	processingCompleted := false
 	defer func() {
 		if !processingCompleted {
-			h.abandonClientReportProcessing(r.Context(), event)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			h.abandonClientReportProcessing(cleanupCtx, event)
 		}
 	}()
 
-	prevEvent, prevErr := h.Queries.GetLastRawEventByEmployee(r.Context(), employee.ID)
-
-	if err := h.Queries.CreateRawEvent(r.Context(), sqlc.CreateRawEventParams{
-		IngestID:      toNullString(ingestID),
-		SourceEventID: toNullString(sourceEventID),
-		ClientEventID: toNullString(clientEventID),
-		EmployeeID:    employee.ID,
-		ReceivedAt:    now,
-		ProcessName:   toNullString(payload.ProcessName),
-		WindowTitle:   toNullString(payload.WindowTitle),
-		IdleSeconds:   payload.IdleSeconds,
-		Status:        sqlc.RawEventsStatus(status),
-		ClientVersion: toNullString(payload.ClientVersion),
-		IpAddress:     toNullString(clientIP(r)),
-	}); err != nil {
-		writeErrorWithCode(w, http.StatusInternalServerError, "server_error", "写入上报失败")
-		return
+	trackedStatus := ""
+	trackedDescription := ""
+	trackedCurrentStart := employee.CurrentSegmentStartedAt
+	trackedLastEnd := employee.LastSegmentEndAt
+	trackedAvailable := employee.CurrentSegmentStartedAt.Valid && employee.LastStatus.Valid && employee.LastSegmentEndAt.Valid
+	if employee.LastStatus.Valid {
+		trackedStatus = string(employee.LastStatus.EmployeesLastStatus)
 	}
-	processingCompleted = true
-
-	if shouldUpdateEmployeeLastSeen(employee, status, description, now) {
-		_ = h.Queries.UpdateEmployeeLastSeen(r.Context(), sqlc.UpdateEmployeeLastSeenParams{
-			LastSeenAt:      sql.NullTime{Time: now, Valid: true},
-			LastStatus:      sqlc.NullEmployeesLastStatus{EmployeesLastStatus: sqlc.EmployeesLastStatus(status), Valid: true},
-			LastDescription: toNullString(description),
-			ID:              employee.ID,
-		})
-	}
-
-	if prevErr == nil {
-		segmentStart := prevEvent.ReceivedAt
-		if employee.LastSegmentEndAt.Valid && employee.LastSegmentEndAt.Time.After(segmentStart) {
-			segmentStart = employee.LastSegmentEndAt.Time
+	trackedDescription = strings.TrimSpace(nullString(employee.LastDescription))
+	if trackedAvailable {
+		if trackedCurrentStart.Time.After(now) {
+			trackedCurrentStart = sql.NullTime{Time: now, Valid: true}
 		}
-		gap := now.Sub(prevEvent.ReceivedAt)
-		if now.After(segmentStart) {
-			if gap > time.Duration(settings.OfflineThresholdSeconds)*time.Second {
-				h.createSegmentAndStatsByContextForEvent(r.Context(), eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, segmentStart, now, "offline", "", "offline")
-			} else {
-				prevDesc := buildDescription(nullString(prevEvent.ProcessName), nullString(prevEvent.WindowTitle))
-				h.createSegmentAndStatsByContextForEvent(r.Context(), eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, segmentStart, now, string(prevEvent.Status), prevDesc, "system")
-			}
+		if trackedLastEnd.Time.Before(trackedCurrentStart.Time) {
+			trackedLastEnd = sql.NullTime{Time: trackedCurrentStart.Time, Valid: true}
 		}
 	}
-
-	segmentEnd := now
-	if employee.LastSegmentEndAt.Valid && employee.LastSegmentEndAt.Time.After(segmentEnd) {
-		segmentEnd = employee.LastSegmentEndAt.Time
-	}
-	_ = h.Queries.UpdateEmployeeLastSegmentEnd(r.Context(), sqlc.UpdateEmployeeLastSegmentEndParams{
-		LastSegmentEndAt: sql.NullTime{Time: segmentEnd, Valid: true},
-		ID:               employee.ID,
-	})
 
 	workEndAccepted := false
 	var workEndErr error
+
 	if reportType == "work_end" {
-		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(r.Context(), employee, payload, now)
+		if trackedAvailable && now.After(trackedLastEnd.Time) && trackedStatus != "" {
+			h.addDailyStatsByRangeForEvent(ctx, eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, trackedStatus, trackedLastEnd.Time, now)
+		}
+
+		workEndAccepted, workEndErr = h.handleWorkEndAfterReport(ctx, employee.ID, employee.DepartmentID, payload, now)
+		if workEndAccepted {
+			if trackedAvailable && trackedStatus != "" && trackedCurrentStart.Valid && now.After(trackedCurrentStart.Time) {
+				h.createTrackedSegmentOnlyByContext(ctx, employee.ID, trackedCurrentStart.Time, now, trackedStatus, trackedDescription, sourceForTrackedStatus(trackedStatus))
+			}
+			eventStatus := trackedStatus
+			if eventStatus == "" {
+				eventStatus = status
+			}
+			h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, eventStatus, payload.ClientVersion, ipAddress)
+			h.clearEmployeeTrackingStateByContext(ctx, employee.ID, now)
+		} else {
+			if trackedAvailable {
+				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, trackedStatus, trackedDescription, trackedCurrentStart, sql.NullTime{Time: now, Valid: true})
+			} else {
+				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, status, description, sql.NullTime{Time: now, Valid: true}, sql.NullTime{Time: now, Valid: true})
+			}
+		}
+	} else {
+		if !trackedAvailable || trackedStatus == "" {
+			h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, status, description, sql.NullTime{Time: now, Valid: true}, sql.NullTime{Time: now, Valid: true})
+			h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
+		} else {
+			if now.After(trackedLastEnd.Time) {
+				h.addDailyStatsByRangeForEvent(ctx, eventStatKey(event), event.IngestID, event.SourceEventID, employee.ID, trackedStatus, trackedLastEnd.Time, now)
+			}
+
+			statusChanged := trackedStatus != status
+			descriptionChanged := trackedDescription != strings.TrimSpace(description)
+			if statusChanged || descriptionChanged {
+				if trackedCurrentStart.Valid && now.After(trackedCurrentStart.Time) {
+					h.createTrackedSegmentOnlyByContext(ctx, employee.ID, trackedCurrentStart.Time, now, trackedStatus, trackedDescription, sourceForTrackedStatus(trackedStatus))
+				}
+				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, status, description, sql.NullTime{Time: now, Valid: true}, sql.NullTime{Time: now, Valid: true})
+				h.createSparseRawEventForEvent(ctx, event, now, payload.ProcessName, payload.WindowTitle, payload.IdleSeconds, status, payload.ClientVersion, ipAddress)
+			} else {
+				h.updateEmployeeTrackingStateByContext(ctx, employee.ID, now, trackedStatus, trackedDescription, trackedCurrentStart, sql.NullTime{Time: now, Valid: true})
+			}
+		}
 	}
 
 	isWorking := reportType != "work_end" || !workEndAccepted
@@ -359,17 +366,18 @@ func (h *Handler) ClientReport(w http.ResponseWriter, r *http.Request) {
 		Time: formatTime(now),
 	})
 
+	if err := h.completeClientReportProcessing(ctx, event); err != nil {
+		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
+		return
+	}
+	processingCompleted = true
+
 	if workEndErr != nil {
 		if typed, ok := workEndErr.(*workEndError); ok {
 			writeErrorWithCodeData(w, typed.Status, typed.Code, typed.Message, typed.Data)
 		} else {
 			writeError(w, http.StatusBadRequest, workEndErr.Error())
 		}
-		return
-	}
-
-	if err := h.completeClientReportProcessing(r.Context(), event); err != nil {
-		writeErrorWithCode(w, http.StatusServiceUnavailable, "report_processing_unavailable", "上报暂时不可用，请稍后重试")
 		return
 	}
 
@@ -391,23 +399,61 @@ func shouldUpdateTokenLastSeen(token sqlc.ClientToken, now time.Time) bool {
 	return now.Sub(token.LastSeen.Time) >= tokenLastSeenMinWriteInterval
 }
 
-func shouldUpdateEmployeeLastSeen(employee sqlc.Employee, status string, description string, now time.Time) bool {
-	if !employee.LastSeenAt.Valid {
-		return true
+func sourceForTrackedStatus(status string) string {
+	if strings.TrimSpace(status) == "offline" {
+		return "offline"
 	}
-	if now.Sub(employee.LastSeenAt.Time) >= employeeLastSeenMinWriteInterval {
-		return true
+	return "system"
+}
+
+func toEmployeeStatus(status string) sqlc.NullEmployeesLastStatus {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return sqlc.NullEmployeesLastStatus{Valid: false}
 	}
-	if !employee.LastStatus.Valid {
-		return true
+	return sqlc.NullEmployeesLastStatus{
+		EmployeesLastStatus: sqlc.EmployeesLastStatus(status),
+		Valid:               true,
 	}
-	if string(employee.LastStatus.EmployeesLastStatus) != status {
-		return true
+}
+
+func (h *Handler) updateEmployeeTrackingStateByContext(ctx context.Context, employeeID int64, lastSeen time.Time, status string, description string, currentStart sql.NullTime, lastEnd sql.NullTime) {
+	_ = h.Queries.UpdateEmployeeTrackingState(ctx, sqlc.UpdateEmployeeTrackingStateParams{
+		LastSeenAt:              sql.NullTime{Time: lastSeen, Valid: true},
+		LastStatus:              toEmployeeStatus(status),
+		LastDescription:         toNullString(description),
+		CurrentSegmentStartedAt: currentStart,
+		LastSegmentEndAt:        lastEnd,
+		ID:                      employeeID,
+	})
+}
+
+func (h *Handler) clearEmployeeTrackingStateByContext(ctx context.Context, employeeID int64, lastSeen time.Time) {
+	h.updateEmployeeTrackingStateByContext(ctx, employeeID, lastSeen, "", "", sql.NullTime{Valid: false}, sql.NullTime{Time: lastSeen, Valid: true})
+}
+
+func (h *Handler) createSparseRawEvent(ctx context.Context, employeeID int64, at time.Time, processName string, windowTitle string, idleSeconds int32, status string, clientVersion string, ipAddress string) {
+	h.createSparseRawEventForEvent(ctx, clientReportIngestEvent{EmployeeID: employeeID}, at, processName, windowTitle, idleSeconds, status, clientVersion, ipAddress)
+}
+
+func (h *Handler) createSparseRawEventForEvent(ctx context.Context, event clientReportIngestEvent, at time.Time, processName string, windowTitle string, idleSeconds int32, status string, clientVersion string, ipAddress string) {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return
 	}
-	if strings.TrimSpace(nullString(employee.LastDescription)) != strings.TrimSpace(description) {
-		return true
-	}
-	return false
+	_ = h.Queries.CreateRawEvent(ctx, sqlc.CreateRawEventParams{
+		IngestID:      toNullString(event.IngestID),
+		SourceEventID: toNullString(event.SourceEventID),
+		ClientEventID: toNullString(event.ClientEventID),
+		EmployeeID:    event.EmployeeID,
+		ReceivedAt:    at,
+		ProcessName:   toNullString(processName),
+		WindowTitle:   toNullString(windowTitle),
+		IdleSeconds:   idleSeconds,
+		Status:        sqlc.RawEventsStatus(status),
+		ClientVersion: toNullString(clientVersion),
+		IpAddress:     toNullString(ipAddress),
+	})
 }
 
 func readBearerToken(r *http.Request) string {
@@ -445,13 +491,14 @@ func (h *Handler) handleWorkSessionReport(ctx context.Context, employeeID int64,
 	case "work_end":
 		if err := h.Queries.CloseWorkSession(ctx, sqlc.CloseWorkSessionParams{
 			EmployeeID: employeeID,
-			EndAt:      now,
+			EndAt:      sql.NullTime{Time: now, Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入下班记录失败")
 		}
 	}
 	return nil
 }
+
 func determineStatus(idleSeconds int32, idleThreshold int32, processName string, windowTitle string, rules []sqlc.ListEnabledRulesRow) string {
 	if idleSeconds >= idleThreshold {
 		return "idle"
@@ -496,11 +543,7 @@ func ruleMatch(rule sqlc.ListEnabledRulesRow, processName string, windowTitle st
 	}
 }
 
-func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
-	h.createSegmentAndStatsByContextForEvent(ctx, "", "", "", employeeID, start, end, status, description, source)
-}
-
-func (h *Handler) createSegmentAndStatsByContextForEvent(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
+func (h *Handler) createTimeSegmentMergedByContext(ctx context.Context, employeeID int64, start time.Time, end time.Time, status string, description string, source string, addStats bool) {
 	if end.Before(start) || end.Equal(start) {
 		return
 	}
@@ -509,6 +552,7 @@ func (h *Handler) createSegmentAndStatsByContextForEvent(ctx context.Context, ev
 	source = strings.TrimSpace(source)
 	description = strings.TrimSpace(description)
 
+	merged := false
 	if h.DB != nil {
 		var lastID int64
 		var lastEnd time.Time
@@ -523,27 +567,42 @@ FROM time_segments WHERE employee_id = ? ORDER BY end_at DESC, id DESC LIMIT 1`,
 			if lastEnd.Equal(start) && lastStatus == status && lastSource == source && lastDescription == description {
 				if result, err := h.DB.ExecContext(ctx, "UPDATE time_segments SET end_at = ? WHERE id = ? AND end_at = ?", end, lastID, lastEnd); err == nil {
 					if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows > 0 {
-						h.addDailyStatsByRange(ctx, eventKey, ingestID, sourceEventID, employeeID, status, start, end)
-						return
+						merged = true
 					}
 				}
 			}
 		}
 	}
 
-	_ = h.Queries.CreateTimeSegment(ctx, sqlc.CreateTimeSegmentParams{
-		EmployeeID:  employeeID,
-		StartAt:     start,
-		EndAt:       end,
-		Status:      sqlc.TimeSegmentsStatus(status),
-		Description: toNullString(description),
-		Source:      sqlc.TimeSegmentsSource(source),
-	})
+	if !merged {
+		_ = h.Queries.CreateTimeSegment(ctx, sqlc.CreateTimeSegmentParams{
+			EmployeeID:  employeeID,
+			StartAt:     start,
+			EndAt:       end,
+			Status:      sqlc.TimeSegmentsStatus(status),
+			Description: toNullString(description),
+			Source:      sqlc.TimeSegmentsSource(source),
+		})
+	}
 
-	h.addDailyStatsByRange(ctx, eventKey, ingestID, sourceEventID, employeeID, status, start, end)
+	if addStats {
+		h.addDailyStatsByRange(ctx, employeeID, status, start, end)
+	}
 }
 
-func (h *Handler) addDailyStatsByRange(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, status string, start time.Time, end time.Time) {
+func (h *Handler) createTrackedSegmentOnlyByContext(ctx context.Context, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
+	h.createTimeSegmentMergedByContext(ctx, employeeID, start, end, status, description, source, false)
+}
+
+func (h *Handler) createSegmentAndStatsByContext(ctx context.Context, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
+	h.createTimeSegmentMergedByContext(ctx, employeeID, start, end, status, description, source, true)
+}
+
+func (h *Handler) addDailyStatsByRange(ctx context.Context, employeeID int64, status string, start time.Time, end time.Time) {
+	h.addDailyStatsByRangeForEvent(ctx, "", "", "", employeeID, status, start, end)
+}
+
+func (h *Handler) addDailyStatsByRangeForEvent(ctx context.Context, eventKey string, ingestID string, sourceEventID string, employeeID int64, status string, start time.Time, end time.Time) {
 	for _, part := range splitByDay(start, end) {
 		increments := buildDailyStatIncrement(status, part.Seconds)
 		if strings.TrimSpace(eventKey) != "" && h.DB != nil {
@@ -571,17 +630,7 @@ func (h *Handler) createSegmentAndStats(r *http.Request, employeeID int64, start
 }
 
 func (h *Handler) createSegmentOnly(r *http.Request, employeeID int64, start time.Time, end time.Time, status string, description string, source string) {
-	if end.Before(start) || end.Equal(start) {
-		return
-	}
-	_ = h.Queries.CreateTimeSegment(r.Context(), sqlc.CreateTimeSegmentParams{
-		EmployeeID:  employeeID,
-		StartAt:     start,
-		EndAt:       end,
-		Status:      sqlc.TimeSegmentsStatus(status),
-		Description: toNullString(description),
-		Source:      sqlc.TimeSegmentsSource(source),
-	})
+	h.createTrackedSegmentOnlyByContext(r.Context(), employeeID, start, end, status, description, source)
 }
 
 type dayPart struct {

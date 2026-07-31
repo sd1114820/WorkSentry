@@ -3,17 +3,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
-	"time"
 )
-
-type CheckoutTemplate struct {
-	ID           int64     `json:"id"`
-	DepartmentID int64     `json:"department_id"`
-	NameZh       string    `json:"name_zh"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
 
 type CheckoutTemplateWithCount struct {
 	CheckoutTemplate
@@ -146,19 +136,6 @@ func (q *Queries) DisableOtherCheckoutTemplates(ctx context.Context, departmentI
 	return err
 }
 
-type CheckoutField struct {
-	ID            int64          `json:"id"`
-	TemplateID    int64          `json:"template_id"`
-	NameZh        string         `json:"name_zh"`
-	Type          string         `json:"type"`
-	Required      bool           `json:"required"`
-	SortOrder     int32          `json:"sort_order"`
-	Enabled       bool           `json:"enabled"`
-	OptionsZhJSON sql.NullString `json:"options_zh_json"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-}
-
 const listCheckoutFieldsByTemplate = `SELECT id, template_id, name_zh, type, required, sort_order, enabled, options_zh_json, created_at, updated_at
 FROM checkout_fields
 WHERE template_id = ?
@@ -181,7 +158,7 @@ func (q *Queries) ListCheckoutFieldsByTemplate(ctx context.Context, templateID i
 			&item.Required,
 			&item.SortOrder,
 			&item.Enabled,
-			&item.OptionsZhJSON,
+			&item.OptionsZhJson,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -246,15 +223,6 @@ func (q *Queries) DeleteCheckoutField(ctx context.Context, id int64) error {
 	return err
 }
 
-type WorkSessionCheckout struct {
-	ID                   int64     `json:"id"`
-	WorkSessionID        int64     `json:"work_session_id"`
-	TemplateID           int64     `json:"template_id"`
-	TemplateSnapshotJSON string    `json:"template_snapshot_json"`
-	DataJSON             string    `json:"data_json"`
-	CreatedAt            time.Time `json:"created_at"`
-}
-
 const getWorkSessionCheckoutBySessionID = `SELECT id, work_session_id, template_id, template_snapshot_json, data_json, created_at
 FROM work_session_checkouts
 WHERE work_session_id = ?
@@ -263,7 +231,7 @@ LIMIT 1`
 func (q *Queries) GetWorkSessionCheckoutBySessionID(ctx context.Context, sessionID int64) (WorkSessionCheckout, error) {
 	row := q.db.QueryRowContext(ctx, getWorkSessionCheckoutBySessionID, sessionID)
 	var item WorkSessionCheckout
-	err := row.Scan(&item.ID, &item.WorkSessionID, &item.TemplateID, &item.TemplateSnapshotJSON, &item.DataJSON, &item.CreatedAt)
+	err := row.Scan(&item.ID, &item.WorkSessionID, &item.TemplateID, &item.TemplateSnapshotJson, &item.DataJson, &item.CreatedAt)
 	return item, err
 }
 

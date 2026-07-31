@@ -32,6 +32,9 @@ internal sealed partial class MainWindow : Window
     private static readonly MediaBrush PolicyHintForeground = new MediaSolidColorBrush(MediaColor.FromRgb(55, 65, 81));
     private static readonly MediaBrush PolicyForceBackground = new MediaSolidColorBrush(MediaColor.FromRgb(254, 226, 226));
     private static readonly MediaBrush PolicyForceForeground = new MediaSolidColorBrush(MediaColor.FromRgb(185, 28, 28));
+    private const int DiagnosticSummaryMaxLength = 40;
+    private const int DiagnosticCauseMaxLength = 96;
+    private const int DiagnosticDetailMaxLength = 120;
 
     private string _currentStatusToken = "待上班";
     private bool _isWorking;
@@ -48,6 +51,8 @@ internal sealed partial class MainWindow : Window
     private string? _updateProgressStage;
     private long _updateProgressReceived;
     private long? _updateProgressTotal;
+    private NetworkDiagnosticSnapshot? _currentDiagnostic;
+    private bool _diagnosticCopied;
 
     public event Action<string>? SaveConfigRequested;
     public event Action? StartRequested;
@@ -71,6 +76,7 @@ internal sealed partial class MainWindow : Window
         UpdateNowButton.Click += (_, _) => UpdateNowRequested?.Invoke();
         UpdateLaterButton.Click += (_, _) => UpdateLaterRequested?.Invoke();
         LanguageComboBox.SelectionChanged += (_, _) => HandleLanguageSelection();
+        CopyDiagnosticButton.Click += (_, _) => CopyDiagnosticFeedback();
     }
 
     private void HandleLanguageSelection()
@@ -139,6 +145,10 @@ internal sealed partial class MainWindow : Window
         {
             UpdateLastReport(_lastReportTime);
         }
+        if (_currentDiagnostic != null)
+        {
+            RenderDiagnostic();
+        }
         if (_showingPrompt)
         {
             ShowUpdatePrompt(_updatePromptForced, _updatePromptVersion, _updatePromptMessageOverride);
@@ -171,7 +181,6 @@ internal sealed partial class MainWindow : Window
         }
     }
 
-
     internal void SetBreakState(bool isBreaking)
     {
         _isBreaking = isBreaking;
@@ -184,6 +193,7 @@ internal sealed partial class MainWindow : Window
         BreakButton.IsEnabled = _isWorking;
         BreakButton.Visibility = _isWorking ? Visibility.Visible : Visibility.Collapsed;
     }
+
     internal void UpdateStatus(string status)
     {
         _currentStatusToken = status;
@@ -272,6 +282,107 @@ internal sealed partial class MainWindow : Window
             UpdatePolicyBadge.Background = PolicyHintBackground;
             UpdatePolicyText.Foreground = PolicyHintForeground;
         }
+    }
+
+    internal void ShowNetworkDiagnostic(NetworkDiagnosticSnapshot diagnostic)
+    {
+        _currentDiagnostic = diagnostic;
+        _diagnosticCopied = false;
+        RenderDiagnostic();
+    }
+
+    internal void ClearNetworkDiagnostic()
+    {
+        _currentDiagnostic = null;
+        _diagnosticCopied = false;
+        DiagnosticCard.Visibility = Visibility.Collapsed;
+        DiagnosticSummaryText.Text = string.Empty;
+        DiagnosticCauseText.Text = string.Empty;
+        DiagnosticDetailText.Text = string.Empty;
+        DiagnosticSummaryText.ToolTip = null;
+        DiagnosticCauseText.ToolTip = null;
+        DiagnosticDetailText.ToolTip = null;
+        DiagnosticCopyStatusText.Text = string.Empty;
+    }
+
+    private void RenderDiagnostic()
+    {
+        if (_currentDiagnostic == null)
+        {
+            ClearNetworkDiagnostic();
+            return;
+        }
+
+        var summary = NetworkDiagnostics.GetSummary(_currentDiagnostic);
+        var cause = NetworkDiagnostics.GetPossibleCause(_currentDiagnostic);
+        var detail = NetworkDiagnostics.GetDetailText(_currentDiagnostic);
+
+        DiagnosticCard.Visibility = Visibility.Visible;
+        DiagnosticSummaryText.Text = CompactDiagnosticBlock(summary, DiagnosticSummaryMaxLength);
+        DiagnosticCauseText.Text = CompactDiagnosticBlock(cause, DiagnosticCauseMaxLength);
+        DiagnosticDetailText.Text = CompactDiagnosticLine(detail, DiagnosticDetailMaxLength);
+        DiagnosticSummaryText.ToolTip = summary;
+        DiagnosticCauseText.ToolTip = cause;
+        DiagnosticDetailText.ToolTip = detail;
+        DiagnosticCopyStatusText.Text = _diagnosticCopied ? LanguageService.GetString("DiagnosticCopySuccess") : string.Empty;
+        CopyDiagnosticButton.IsEnabled = !string.IsNullOrWhiteSpace(_currentDiagnostic.FeedbackPayload);
+    }
+
+    private void CopyDiagnosticFeedback()
+    {
+        if (_currentDiagnostic == null || string.IsNullOrWhiteSpace(_currentDiagnostic.FeedbackPayload))
+        {
+            _diagnosticCopied = false;
+            DiagnosticCopyStatusText.Text = LanguageService.GetString("DiagnosticCopyUnavailable");
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(_currentDiagnostic.FeedbackPayload);
+            _diagnosticCopied = true;
+            DiagnosticCopyStatusText.Text = LanguageService.GetString("DiagnosticCopySuccess");
+        }
+        catch
+        {
+            _diagnosticCopied = false;
+            DiagnosticCopyStatusText.Text = LanguageService.GetString("DiagnosticCopyFailed");
+        }
+    }
+
+    private static string CompactDiagnosticBlock(string? value, int maxLength)
+    {
+        return CompactDiagnosticText(value, maxLength);
+    }
+
+    private static string CompactDiagnosticLine(string? value, int maxLength)
+    {
+        return CompactDiagnosticText(value, maxLength);
+    }
+
+    private static string CompactDiagnosticText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var text = value.Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim();
+
+        while (text.Contains("  ", StringComparison.Ordinal))
+        {
+            text = text.Replace("  ", " ", StringComparison.Ordinal);
+        }
+
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        var sliceLength = Math.Max(1, maxLength - 3);
+        return text.Substring(0, sliceLength).TrimEnd() + "...";
     }
 
     internal void ShowUpdatePrompt(bool forced, string? version, string? messageOverride = null)
@@ -371,3 +482,4 @@ internal sealed partial class MainWindow : Window
         EmployeeCodeBox.Focus();
     }
 }
+

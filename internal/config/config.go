@@ -22,7 +22,8 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	DSN string `yaml:"dsn"`
+	DSN                    string `yaml:"dsn"`
+	RawEventsRetentionDays int    `yaml:"raw_events_retention_days"`
 }
 
 type MQConfig struct {
@@ -34,10 +35,9 @@ type MQConfig struct {
 }
 
 type AppConfig struct {
-	Timezone              string      `yaml:"timezone"`
-	Environment           string      `yaml:"environment"`
-	RawEventRetentionDays int         `yaml:"raw_event_retention_days"`
-	Admin                 AdminConfig `yaml:"admin"`
+	Timezone    string      `yaml:"timezone"`
+	Environment string      `yaml:"environment"`
+	Admin       AdminConfig `yaml:"admin"`
 }
 
 type AdminConfig struct {
@@ -64,6 +64,9 @@ func Load(path string) (*Config, error) {
 	if cfg.Database.DSN == "" {
 		return nil, errors.New("数据库连接不能为空")
 	}
+	if cfg.Database.RawEventsRetentionDays <= 0 {
+		cfg.Database.RawEventsRetentionDays = 3
+	}
 
 	return &cfg, nil
 }
@@ -76,6 +79,9 @@ func defaultConfig() Config {
 			WriteTimeoutSeconds: 15,
 			IdleTimeoutSeconds:  60,
 		},
+		Database: DatabaseConfig{
+			RawEventsRetentionDays: 3,
+		},
 		MQ: MQConfig{
 			Enabled:             false,
 			Provider:            "kafka",
@@ -83,10 +89,9 @@ func defaultConfig() Config {
 			WriteTimeoutSeconds: 3,
 		},
 		App: AppConfig{
-			Timezone:              "Asia/Shanghai",
-			Environment:           "dev",
-			RawEventRetentionDays: 0,
-			Admin:                 AdminConfig{},
+			Timezone:    "Asia/Shanghai",
+			Environment: "dev",
+			Admin:       AdminConfig{},
 		},
 	}
 }

@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
-
-	"worksentry/internal/db/sqlc"
 )
 
 func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
@@ -26,17 +24,7 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	departmentID, _ := strconv.ParseInt(r.URL.Query().Get("departmentId"), 10, 64)
-	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.Local)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	rows, err := h.Queries.ListDailyStatsForExportByDate(r.Context(), sqlc.ListDailyStatsForExportByDateParams{
-		WorkStartFrom: dayStart,
-		WorkStartTo:   dayEnd,
-		WorkEndFrom:   dayStart,
-		WorkEndTo:     dayEnd,
-		StatDate:      date,
-		Column6:       departmentID,
-		DepartmentID:  toNullInt64(departmentID),
-	})
+	rows, err := h.Queries.ListDailyStatsForExportByDate(r.Context(), buildDailyStatsExportParams(date, departmentID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "导出失败")
 		return
@@ -46,7 +34,7 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 	sheet := "日报表"
 	file.SetSheetName("Sheet1", sheet)
 
-	headers := []string{"日期", "工号", "姓名", "部门", "上班打卡时间", "下班打卡时间", "工作时长", "常规时长", "摸鱼时长", "离开时长", "离线时长", "在岗时长", "有效工时"}
+	headers := []string{"日期", "工号", "姓名", "部门", "上班打卡时间", "下班打卡时间", "上班时长", "工作时长", "常规时长", "摸鱼时长", "离开时长", "离线时长", "在岗时长", "有效工时"}
 	for col, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(col+1, 1)
 		_ = file.SetCellValue(sheet, cell, header)
@@ -54,17 +42,27 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 
 	for i, row := range rows {
 		idx := i + 2
+		metrics := buildDailyReportMetrics(
+			int64(row.NormalSeconds),
+			int64(row.FishSeconds),
+			int64(row.IdleSeconds),
+			int64(row.OfflineSeconds),
+			int64(row.EffectiveSeconds),
+			row.BreakSeconds,
+			row.OnDutySeconds,
+		)
 		values := []any{
 			dateValue,
 			row.EmployeeCode,
 			row.Name,
 			nullString(row.DepartmentName),
-			formatPunchHHmmOrMissing(row.FirstStartAt),
-			formatPunchHHmmOrMissing(row.LastEndAt),
-			formatDuration(int64(row.WorkSeconds)),
+			formatPunchHHmmOrMissing(interfaceToNullTime(row.FirstStartAt)),
+			formatPunchHHmmOrMissing(interfaceToNullTime(row.LastEndAt)),
+			formatDuration(metrics.OnDutySeconds),
+			formatDuration(metrics.WorkSeconds),
 			formatDuration(int64(row.NormalSeconds)),
 			formatDuration(int64(row.FishSeconds)),
-			formatDuration(int64(row.IdleSeconds)),
+			formatDuration(metrics.IdleSeconds),
 			formatDuration(int64(row.OfflineSeconds)),
 			formatDuration(int64(row.AttendanceSeconds)),
 			formatDuration(int64(row.EffectiveSeconds)),
@@ -75,7 +73,7 @@ func (h *Handler) ExportDaily(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	file.SetColWidth(sheet, "A", "M", 16)
+	file.SetColWidth(sheet, "A", "N", 16)
 
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=worksentry_daily.xlsx")
@@ -86,6 +84,17 @@ func (h *Handler) ExportEmployees(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "不支持的请求方式")
 		return
+	}
+
+	enabledOnly := true
+	enabledOnlyRaw := r.URL.Query().Get("enabledOnly")
+	if enabledOnlyRaw != "" {
+		parsed, parseErr := strconv.ParseBool(enabledOnlyRaw)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "导出参数错误")
+			return
+		}
+		enabledOnly = parsed
 	}
 
 	rows, err := h.Queries.ListEmployeesAdmin(r.Context())
@@ -104,15 +113,26 @@ func (h *Handler) ExportEmployees(w http.ResponseWriter, r *http.Request) {
 		_ = file.SetCellValue(sheet, cell, header)
 	}
 
-	for i, row := range rows {
-		idx := i + 2
+	seenEmployees := make(map[int64]struct{}, len(rows))
+	excelRow := 2
+	for _, row := range rows {
+		if enabledOnly && !row.Enabled {
+			continue
+		}
+		if _, exists := seenEmployees[row.ID]; exists {
+			continue
+		}
+		seenEmployees[row.ID] = struct{}{}
+
 		clockIn := ""
-		if row.LastStartAt.Valid {
-			clockIn = formatTime(row.LastStartAt.Time)
+		lastStartAt := interfaceToNullTime(row.LastStartAt)
+		if lastStartAt.Valid {
+			clockIn = formatTime(lastStartAt.Time)
 		}
 		clockOut := ""
-		if row.LastEndAt.Valid {
-			clockOut = formatTime(row.LastEndAt.Time)
+		lastEndAt := interfaceToNullTime(row.LastEndAt)
+		if lastEndAt.Valid {
+			clockOut = formatTime(lastEndAt.Time)
 		}
 
 		bindStatus := "未绑定"
@@ -136,9 +156,10 @@ func (h *Handler) ExportEmployees(w http.ResponseWriter, r *http.Request) {
 			statusLabel,
 		}
 		for col, value := range values {
-			cell, _ := excelize.CoordinatesToCellName(col+1, idx)
+			cell, _ := excelize.CoordinatesToCellName(col+1, excelRow)
 			_ = file.SetCellValue(sheet, cell, value)
 		}
+		excelRow++
 	}
 
 	file.SetColWidth(sheet, "A", "H", 18)

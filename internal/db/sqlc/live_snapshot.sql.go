@@ -29,20 +29,22 @@ LEFT JOIN (
   GROUP BY employee_id
 ) ws ON ws.employee_id = e.id
 LEFT JOIN (
-  SELECT employee_id,
+  SELECT ws.employee_id,
          CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS has_today_punch
-  FROM work_sessions
-  WHERE (start_at >= ?1 AND start_at < ?2)
-     OR (end_at >= ?1 AND end_at < ?2)
-  GROUP BY employee_id
+  FROM work_sessions ws
+  WHERE (ws.start_at >= ? AND ws.start_at < ?)
+     OR (ws.end_at >= ? AND ws.end_at < ?)
+  GROUP BY ws.employee_id
 ) tp ON tp.employee_id = e.id
 WHERE e.enabled = 1
 ORDER BY e.id DESC
 `
 
 type ListLiveSnapshotParams struct {
-	DayStart time.Time `json:"day_start"`
-	DayEnd   time.Time `json:"day_end"`
+	StartAt   time.Time    `json:"start_at"`
+	StartAt_2 time.Time    `json:"start_at_2"`
+	EndAt     sql.NullTime `json:"end_at"`
+	EndAt_2   sql.NullTime `json:"end_at_2"`
 }
 
 type ListLiveSnapshotRow struct {
@@ -52,12 +54,17 @@ type ListLiveSnapshotRow struct {
 	LastStatus      NullEmployeesLastStatus `json:"last_status"`
 	LastDescription sql.NullString          `json:"last_description"`
 	LastSeenAt      sql.NullTime            `json:"last_seen_at"`
-	IsWorking       int64                   `json:"is_working"`
-	HasTodayPunch   int64                   `json:"has_today_punch"`
+	IsWorking       int32                   `json:"is_working"`
+	HasTodayPunch   int32                   `json:"has_today_punch"`
 }
 
 func (q *Queries) ListLiveSnapshot(ctx context.Context, arg ListLiveSnapshotParams) ([]ListLiveSnapshotRow, error) {
-	rows, err := q.db.QueryContext(ctx, listLiveSnapshot, arg.DayStart, arg.DayEnd)
+	rows, err := q.db.QueryContext(ctx, listLiveSnapshot,
+		arg.StartAt,
+		arg.StartAt_2,
+		arg.EndAt,
+		arg.EndAt_2,
+	)
 	if err != nil {
 		return nil, err
 	}

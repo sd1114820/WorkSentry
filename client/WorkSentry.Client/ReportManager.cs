@@ -83,15 +83,20 @@ internal sealed class ReportManager
     private DateTime _lastErrorFlushAtUtc = DateTime.MinValue;
     private DateTime _lastConnectivityErrorEnqueuedAtUtc = DateTime.MinValue;
     private string? _token;
-    private string _optionalUpdateNotified = "";
+    private string _optionalUpdateNotified = string.Empty;
     private readonly Dictionary<string, string> _pendingClientEventIds = new(StringComparer.Ordinal);
+    private readonly object _pendingClientEventIdsLock = new();
     private bool _forceReport;
     private bool _isBreaking;
+    private NetworkDiagnosticSnapshot? _latestDiagnostic;
 
     public event Action<string?, string?>? ForcedUpdate;
     public event Action<string?, string?>? OptionalUpdate;
     public event Action<string>? StatusChanged;
     public event Action<AppConfig>? SettingsChanged;
+    public event Action<NetworkDiagnosticSnapshot?>? DiagnosticChanged;
+
+    public NetworkDiagnosticSnapshot? LatestDiagnostic => _latestDiagnostic;
 
     public ReportManager(AppConfig config, ConfigStore configStore, TokenStore tokenStore, Logger logger)
     {
@@ -162,7 +167,7 @@ internal sealed class ReportManager
 
     public void ResetOptionalUpdateNotice()
     {
-        _optionalUpdateNotified = "";
+        _optionalUpdateNotified = string.Empty;
     }
 
     public async Task CheckUpdateAsync(CancellationToken ct)
@@ -185,6 +190,7 @@ internal sealed class ReportManager
             _token = response.Token;
             _tokenStore.SaveToken(response.Token);
             ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
+            ClearDiagnostic();
         }
         catch (Exception ex)
         {
@@ -215,6 +221,7 @@ internal sealed class ReportManager
             }
 
             var response = await _apiClient.GetCheckoutTemplateAsync(_token!, ct).ConfigureAwait(false);
+            ClearDiagnostic();
             return OperationResult<CheckoutTemplateResponse?>.Ok(response);
         }
         catch (TaskCanceledException) when (ct.IsCancellationRequested)
@@ -223,10 +230,11 @@ internal sealed class ReportManager
         }
         catch (Exception ex)
         {
-            var fail = HandleReportException(ex, false);
+            var fail = HandleReportException(ex, false, "checkout_template");
             return OperationResult<CheckoutTemplateResponse?>.Fail(fail.Error, fail.ErrorCode, fail.ErrorData, fail.FocusEmployeeCode);
         }
     }
+
     private async Task LoopAsync(CancellationToken ct)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
@@ -276,12 +284,9 @@ internal sealed class ReportManager
                         _forceReport = false;
                         _lastSample = sample;
                     }
-                    else
+                    else if (forced)
                     {
-                        if (forced)
-                        {
-                            _forceReport = true;
-                        }
+                        _forceReport = true;
                     }
                 }
                 else if (shouldHeartbeat)
@@ -330,11 +335,7 @@ internal sealed class ReportManager
         {
             return true;
         }
-        if (current.IsIdle != previous.IsIdle)
-        {
-            return true;
-        }
-        return false;
+        return current.IsIdle != previous.IsIdle;
     }
 
     private async Task EnsureBoundAsync(CancellationToken ct)
@@ -360,6 +361,7 @@ internal sealed class ReportManager
         _token = response.Token;
         _tokenStore.SaveToken(response.Token);
         ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
+        ClearDiagnostic();
         StatusChanged?.Invoke("已绑定");
     }
 
@@ -390,6 +392,7 @@ internal sealed class ReportManager
                 _ = FlushErrorQueueSafeAsync(ct);
             }
             ApplyServerSettings(response.IdleThresholdSeconds, response.HeartbeatIntervalSeconds, response.OfflineThresholdSeconds, response.UpdatePolicy, response.LatestVersion, response.UpdateUrl);
+            ClearDiagnostic();
             if (notifyStatus)
             {
                 StatusChanged?.Invoke("已上报");
@@ -412,6 +415,7 @@ internal sealed class ReportManager
             {
                 ClearClientEventId(reportKey);
             }
+            var fail = HandleReportException(ex, true, reportType);
             if (ex is ApiException || ex is HttpRequestException || ex is TaskCanceledException)
             {
                 var lastSuccess = _lastSuccessfulReportAtUtc == DateTime.MinValue
@@ -421,20 +425,20 @@ internal sealed class ReportManager
                 if (DateTime.UtcNow - lastSuccess >= TimeSpan.FromSeconds(thresholdSeconds) &&
                     DateTime.UtcNow - _lastConnectivityErrorEnqueuedAtUtc >= TimeSpan.FromMinutes(10))
                 {
-                    EnqueueClientError("report_connectivity_issue", ex, reportType);
+                    EnqueueClientError("report_connectivity_issue", ex, reportType, _latestDiagnostic);
                     _lastConnectivityErrorEnqueuedAtUtc = DateTime.UtcNow;
                 }
             }
             else
             {
-                EnqueueClientError("report_exception", ex, reportType);
+                EnqueueClientError("report_exception", ex, reportType, _latestDiagnostic);
             }
 
-            return HandleReportException(ex, true);
+            return fail;
         }
     }
 
-    private ReportResult HandleReportException(Exception ex, bool registerBackoff)
+    private ReportResult HandleReportException(Exception ex, bool registerBackoff, string? reportType)
     {
         if (ex is ApiException or HttpRequestException or TaskCanceledException or InvalidOperationException)
         {
@@ -446,6 +450,7 @@ internal sealed class ReportManager
         }
 
         var mapping = ClientErrorMapper.Map(ex, _configStore.ConfigPath);
+        SetDiagnostic(NetworkDiagnostics.Create(ex, _config.ServerUrl, _config.EmployeeCode, reportType, _lastSuccessfulReportAtUtc, mapping.StatusToken));
 
         if (mapping.ShouldClearToken)
         {
@@ -493,23 +498,29 @@ internal sealed class ReportManager
 
     private string GetOrCreateClientEventId(string reportKey)
     {
-        if (_pendingClientEventIds.TryGetValue(reportKey, out var existing) && !string.IsNullOrWhiteSpace(existing))
+        lock (_pendingClientEventIdsLock)
         {
-            return existing;
-        }
+            if (_pendingClientEventIds.TryGetValue(reportKey, out var existing) && !string.IsNullOrWhiteSpace(existing))
+            {
+                return existing;
+            }
 
-        var created = Guid.NewGuid().ToString("N");
-        if (_pendingClientEventIds.Count >= MaxPendingClientEventIds)
-        {
-            _pendingClientEventIds.Clear();
+            var created = Guid.NewGuid().ToString("N");
+            if (_pendingClientEventIds.Count >= MaxPendingClientEventIds)
+            {
+                _pendingClientEventIds.Clear();
+            }
+            _pendingClientEventIds[reportKey] = created;
+            return created;
         }
-        _pendingClientEventIds[reportKey] = created;
-        return created;
     }
 
     private void ClearClientEventId(string reportKey)
     {
-        _pendingClientEventIds.Remove(reportKey);
+        lock (_pendingClientEventIdsLock)
+        {
+            _pendingClientEventIds.Remove(reportKey);
+        }
     }
 
     private static string BuildReportEventKey(SampleState sample, string reportType, ClientCheckoutPayload? checkout, string? reason)
@@ -552,7 +563,6 @@ internal sealed class ReportManager
         }
     }
 
-
     private async Task FlushErrorQueueSafeAsync(CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_token))
@@ -571,7 +581,7 @@ internal sealed class ReportManager
         }
     }
 
-    private void EnqueueClientError(string errorType, Exception ex, string? reportType)
+    private void EnqueueClientError(string errorType, Exception ex, string? reportType, NetworkDiagnosticSnapshot? diagnostic = null)
     {
         try
         {
@@ -590,6 +600,11 @@ internal sealed class ReportManager
                 context["lastIdleSeconds"] = _lastSample.IdleSeconds.ToString();
             }
 
+            foreach (var entry in NetworkDiagnostics.BuildQueueContext(diagnostic ?? _latestDiagnostic))
+            {
+                context[entry.Key] = entry.Value;
+            }
+
             _errorQueue.Enqueue(new ClientErrorReportRequest
             {
                 OccurredAt = DateTime.UtcNow.ToString("O"),
@@ -605,17 +620,29 @@ internal sealed class ReportManager
         {
             // ignore
         }
-    }    private void TriggerForcedUpdate()
+    }
+
+    private void SetDiagnostic(NetworkDiagnosticSnapshot? diagnostic)
+    {
+        _latestDiagnostic = diagnostic;
+        DiagnosticChanged?.Invoke(diagnostic);
+    }
+
+    private void ClearDiagnostic()
+    {
+        if (_latestDiagnostic == null)
+        {
+            return;
+        }
+
+        _latestDiagnostic = null;
+        DiagnosticChanged?.Invoke(null);
+    }
+
+    private void TriggerForcedUpdate()
     {
         ForcedUpdate?.Invoke(_config.LatestVersion, _config.UpdateUrl);
         Stop();
     }
 }
-
-
-
-
-
-
-
 
