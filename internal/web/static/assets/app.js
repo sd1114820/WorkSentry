@@ -12,6 +12,7 @@ const navItems = document.querySelectorAll('.nav-item');
 let authToken = localStorage.getItem('adminToken') || '';
 let adminName = localStorage.getItem('adminName') || '';
 let settingsCache = null;
+let historyCleanupPollTimer = null;
 const liveModeStorageKey = 'liveViewMode';
 const liveOnlyAnomalyStorageKey = 'liveOnlyAnomaly';
 const liveAnomalyStatuses = ['offline', 'fish', 'idle'];
@@ -137,38 +138,74 @@ function setAuth(token, name) {
   }
 }
 
-async function fetchJSON(url, options) {
+async function requestWithClearError(url, options) {
   const opts = options ? { ...options } : {};
   opts.headers = opts.headers || {};
   if (authToken) {
     opts.headers.Authorization = 'Bearer ' + authToken;
   }
-  const resp = await fetch(url, opts);
+  try {
+    return await fetch(url, opts);
+  } catch (error) {
+    throw new Error('无法连接服务：网络中断、服务不可用或请求被网关终止');
+  }
+}
+
+async function responseErrorMessage(resp) {
+  const data = await resp.clone().json().catch(() => ({}));
+  if (data && data.message) {
+    return data.message;
+  }
+  const errorId = resp.headers.get('X-Error-ID');
+  if (errorId) {
+    return '请求失败（状态码：' + resp.status + '，错误编号：' + errorId + '）';
+  }
+  if (resp.status === 504) {
+    return '请求超时（状态码：504）：服务或数据库未在网关时限内返回';
+  }
+  if (resp.status === 502) {
+    return '网关无法连接服务（状态码：502）：请检查服务进程和监听端口';
+  }
+  if (resp.status === 503) {
+    return '服务暂时不可用（状态码：503）：请稍后重试并查看服务日志';
+  }
+  return '请求失败（状态码：' + resp.status + '，服务未返回可识别的错误信息）';
+}
+
+async function responseInvalidatesAdminSession(resp) {
+  if (resp.status !== 401) return false;
+  const data = await resp.clone().json().catch(() => ({}));
+  return ['admin_token_missing', 'admin_session_invalid', 'admin_session_expired'].includes(data.code);
+}
+
+async function fetchJSON(url, options) {
+  const resp = await requestWithClearError(url, options);
   if (resp.status === 401) {
-    setAuth('', '');
-    throw new Error('请先登录');
+    if (await responseInvalidatesAdminSession(resp)) {
+      setAuth('', '');
+    }
+    throw new Error(await responseErrorMessage(resp));
   }
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.message || '请求失败');
+    throw new Error(await responseErrorMessage(resp));
   }
-  return resp.json();
+  try {
+    return await resp.json();
+  } catch (error) {
+    throw new Error('服务响应格式错误（状态码：' + resp.status + '）');
+  }
 }
 
 async function fetchBlob(url, options) {
-  const opts = options ? { ...options } : {};
-  opts.headers = opts.headers || {};
-  if (authToken) {
-    opts.headers.Authorization = 'Bearer ' + authToken;
-  }
-  const resp = await fetch(url, opts);
+  const resp = await requestWithClearError(url, options);
   if (resp.status === 401) {
-    setAuth('', '');
-    throw new Error('请先登录');
+    if (await responseInvalidatesAdminSession(resp)) {
+      setAuth('', '');
+    }
+    throw new Error(await responseErrorMessage(resp));
   }
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.message || '请求失败');
+    throw new Error(await responseErrorMessage(resp));
   }
   return resp.blob();
 }
@@ -261,6 +298,10 @@ function logout() {
     clearInterval(liveTimer);
     liveTimer = null;
   }
+  if (historyCleanupPollTimer) {
+    clearTimeout(historyCleanupPollTimer);
+    historyCleanupPollTimer = null;
+  }
   setAuth('', '');
   connectionStatus.textContent = '未连接';
 }
@@ -270,6 +311,8 @@ function collectSettingsWarnings() {
   const heartbeat = Number(document.getElementById('heartbeatInterval').value || 0);
   const offline = Number(document.getElementById('offlineThreshold').value || 0);
   const fish = Number(document.getElementById('fishRatioWarn').value || 0);
+  const retentionDays = Number(document.getElementById('historyRetentionDays').value || 0);
+  const cleanupHour = Number(document.getElementById('historyCleanupHour').value || -1);
   const warnings = [];
 
   if (!idle || idle <= 0) {
@@ -292,6 +335,12 @@ function collectSettingsWarnings() {
 
   if (Number.isFinite(fish) && (fish < 0 || fish > 100)) {
     warnings.push('摸鱼比例阈值建议在 0 到 100 之间。');
+  }
+  if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 3650) {
+    warnings.push('历史数据保留天数必须在 1 到 3650 之间。');
+  }
+  if (!Number.isInteger(cleanupHour) || cleanupHour < 0 || cleanupHour > 23) {
+    warnings.push('历史数据清理小时必须在 0 到 23 之间。');
   }
 
   return warnings;
@@ -321,7 +370,14 @@ async function loadSettings() {
     document.getElementById('updatePolicy').value = data.updatePolicy;
     document.getElementById('latestVersion').value = data.latestVersion || '';
     document.getElementById('updateUrl').value = data.updateUrl || '';
+    document.getElementById('historyCleanupEnabled').checked = !!data.historyCleanupEnabled;
+    document.getElementById('historyRetentionDays').value = data.historyRetentionDays || 40;
+    document.getElementById('historyCleanupHour').value = Number.isInteger(data.historyCleanupHour) ? data.historyCleanupHour : 3;
     updatePolicyValue.textContent = data.updatePolicy === 1 ? '强制更新' : '提示更新';
+    updateHistoryCleanupButtonLabel();
+    if (data.historyCleanupLastRunAt) {
+      document.getElementById('historyCleanupStatus').textContent = '上次完成：' + data.historyCleanupLastRunAt;
+    }
     renderSettingsWarnings();
   } catch (error) {
     connectionStatus.textContent = '连接异常';
@@ -337,6 +393,9 @@ async function saveSettings() {
     updatePolicy: Number(document.getElementById('updatePolicy').value || 0),
     latestVersion: document.getElementById('latestVersion').value.trim(),
     updateUrl: document.getElementById('updateUrl').value.trim(),
+    historyCleanupEnabled: document.getElementById('historyCleanupEnabled').checked,
+    historyRetentionDays: Number(document.getElementById('historyRetentionDays').value || 0),
+    historyCleanupHour: Number(document.getElementById('historyCleanupHour').value || 0),
   };
 
   const warnings = renderSettingsWarnings();
@@ -354,8 +413,154 @@ async function saveSettings() {
     updatePolicyValue.textContent = payload.updatePolicy === 1 ? '强制更新' : '提示更新';
     setStatus('保存成功', document.getElementById('settingsStatus'));
     settingsCache = payload;
+    updateHistoryCleanupButtonLabel();
+    loadHistoryCleanupStatus();
   } catch (error) {
     setStatus(error.message, document.getElementById('settingsStatus'));
+  }
+}
+
+function updateHistoryCleanupButtonLabel() {
+  const button = document.getElementById('runHistoryCleanup');
+  const input = document.getElementById('historyRetentionDays');
+  if (!button || !input) return;
+  const days = Number(input.value || 40);
+  button.dataset.defaultText = '立即清理 ' + days + ' 天前数据';
+  if (!button.disabled) {
+    button.textContent = button.dataset.defaultText;
+  }
+}
+
+function formatCleanupElapsed(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainingSeconds = total % 60;
+  if (hours > 0) return hours + ' 小时 ' + minutes + ' 分';
+  if (minutes > 0) return minutes + ' 分 ' + remainingSeconds + ' 秒';
+  return remainingSeconds + ' 秒';
+}
+
+function renderHistoryCleanupStatus(status) {
+  const element = document.getElementById('historyCleanupStatus');
+  if (!element) return;
+  if (!status) {
+    element.textContent = '无法读取清理状态';
+    return;
+  }
+  element.textContent = status.message || (status.lastRunAt ? '上次完成：' + status.lastRunAt : '尚未执行');
+  setReportButtonBusy('runHistoryCleanup', !!status.running, '清理中...');
+  const cancelButton = document.getElementById('cancelHistoryCleanup');
+  if (cancelButton) {
+    cancelButton.disabled = !status.running;
+  }
+
+  const progress = document.getElementById('historyCleanupProgress');
+  if (!progress) return;
+  const totalTargets = Math.max(0, Number(status.totalTargets || 0));
+  const completedTargets = Math.min(totalTargets, Math.max(0, Number(status.completedTargets || 0)));
+  const shouldShowProgress = !!status.running || totalTargets > 0 || Number(status.totalDeleted || 0) > 0;
+  progress.classList.toggle('is-hidden', !shouldShowProgress);
+  if (!shouldShowProgress) return;
+
+  document.getElementById('historyCleanupCurrentTarget').textContent = status.running
+    ? '正在清理：' + (status.currentTarget || '正在准备')
+    : (status.message || '清理已结束');
+  const currentTargetNumber = status.running && totalTargets > 0 ? Math.min(totalTargets, completedTargets + 1) : completedTargets;
+  const totalDeleted = Math.max(0, Number(status.totalDeleted || 0));
+  const totalCandidates = Math.max(0, Number(status.totalCandidates || 0));
+  const isCounting = !!status.running && String(status.currentTarget || '').startsWith('统计待清理数据');
+  const deleteRatio = totalCandidates > 0 ? Math.min(1, totalDeleted / totalCandidates) : ((!status.running && totalTargets > 0 && completedTargets === totalTargets) ? 1 : 0);
+  const rawPercent = deleteRatio * 100;
+  const percentText = rawPercent > 0 && rawPercent < 0.01 ? '<0.01%' : rawPercent.toFixed(2) + '%';
+  document.getElementById('historyCleanupTargetCount').textContent = isCounting
+    ? '正在统计真实待清理总量，统计完成后开始删除'
+    : (status.running
+      ? '分项进度：已完成 ' + completedTargets + '/' + totalTargets + '，正在执行第 ' + currentTargetNumber + ' 项'
+      : '分项进度：已完成 ' + completedTargets + '/' + totalTargets);
+  document.getElementById('historyCleanupDeleted').textContent = totalDeleted.toLocaleString();
+  document.getElementById('historyCleanupCandidates').textContent = totalCandidates > 0 ? totalCandidates.toLocaleString() + ' 条' : (isCounting ? '统计中' : '0 条');
+  document.getElementById('historyCleanupPercent').textContent = percentText;
+  document.getElementById('historyCleanupTargetDeleted').textContent = Number(status.currentTargetDeleted || 0).toLocaleString();
+  document.getElementById('historyCleanupElapsed').textContent = formatCleanupElapsed(status.elapsedSeconds);
+
+  const totalEmployees = Math.max(0, Number(status.totalEmployees || 0));
+  const processedEmployees = Math.min(totalEmployees, Math.max(0, Number(status.processedEmployees || 0)));
+  document.getElementById('historyCleanupProgressFill').style.width = rawPercent.toFixed(2) + '%';
+  document.getElementById('historyCleanupProgressTrack').classList.toggle('is-running', !!status.running);
+
+  const employeeProgress = document.getElementById('historyCleanupEmployeeProgress');
+  const currentEmployeeNumber = totalEmployees > 0 ? Math.min(totalEmployees, processedEmployees + 1) : 0;
+  if (isCounting && totalEmployees > 0) {
+    employeeProgress.textContent = '时间段明细统计：正在统计第 ' + currentEmployeeNumber + '/' + totalEmployees + ' 位员工，已统计 ' + processedEmployees + ' 位';
+  } else if (totalEmployees > 0) {
+    employeeProgress.textContent = '时间段明细：正在处理第 ' + currentEmployeeNumber + '/' + totalEmployees + ' 位有历史数据的员工，已完整处理 ' + processedEmployees + ' 位，当前项目已执行 ' + Number(status.currentTargetBatches || 0) + ' 批';
+  } else {
+    employeeProgress.textContent = status.running && Number(status.currentTargetBatches || 0) > 0 ? '当前项目已执行 ' + Number(status.currentTargetBatches || 0) + ' 批' : '';
+  }
+
+  const details = status.details && typeof status.details === 'object' ? status.details : {};
+  const detailItems = Object.entries(details).map(([name, deleted]) => name + ' ' + Number(deleted || 0).toLocaleString() + ' 条');
+  document.getElementById('historyCleanupDetails').textContent = detailItems.length > 0 ? '分项：' + detailItems.join('；') : '';
+}
+
+async function loadHistoryCleanupStatus() {
+  if (historyCleanupPollTimer) {
+    clearTimeout(historyCleanupPollTimer);
+    historyCleanupPollTimer = null;
+  }
+  try {
+    const status = await fetchJSON('/api/v1/admin/history-cleanup');
+    renderHistoryCleanupStatus(status);
+    if (status.running) {
+      historyCleanupPollTimer = setTimeout(loadHistoryCleanupStatus, 1000);
+    }
+  } catch (error) {
+    document.getElementById('historyCleanupStatus').textContent = error.message || '读取清理状态失败';
+    setReportButtonBusy('runHistoryCleanup', false, '');
+  }
+}
+
+async function runHistoryCleanup() {
+  const days = Number(document.getElementById('historyRetentionDays').value || 0);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    document.getElementById('historyCleanupStatus').textContent = '请先填写正确的保留天数';
+    return;
+  }
+  if (!window.confirm('确认永久删除 ' + days + ' 天以前的历史运行数据？考核、交接班和审计记录不会删除。')) {
+    return;
+  }
+  setReportButtonBusy('runHistoryCleanup', true, '启动中...');
+  try {
+    const status = await fetchJSON('/api/v1/admin/history-cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ retentionDays: days }),
+    });
+    renderHistoryCleanupStatus(status);
+    historyCleanupPollTimer = setTimeout(loadHistoryCleanupStatus, 1000);
+  } catch (error) {
+    document.getElementById('historyCleanupStatus').textContent = error.message || '启动清理失败';
+    setReportButtonBusy('runHistoryCleanup', false, '');
+  }
+}
+
+async function cancelHistoryCleanup() {
+  const cancelButton = document.getElementById('cancelHistoryCleanup');
+  if (cancelButton) {
+    cancelButton.disabled = true;
+    cancelButton.textContent = '停止中...';
+  }
+  try {
+    const status = await fetchJSON('/api/v1/admin/history-cleanup', { method: 'DELETE' });
+    renderHistoryCleanupStatus(status);
+    historyCleanupPollTimer = setTimeout(loadHistoryCleanupStatus, 500);
+  } catch (error) {
+    document.getElementById('historyCleanupStatus').textContent = error.message || '停止清理失败';
+  } finally {
+    if (cancelButton) {
+      cancelButton.textContent = '停止清理';
+    }
   }
 }
 async function loadRules() {
@@ -1489,19 +1694,48 @@ function renderTable(container, headers, rows, colsClass) {
   container.innerHTML = headerHtml + rows.join('');
 }
 
-async function loadDailyReport() {
-  const dateInput = document.getElementById('reportDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
-  const deptId = document.getElementById('reportDepartment').value;
-  let url = '/api/v1/admin/reports/daily?date=' + encodeURIComponent(date);
-  if (deptId && Number(deptId) > 0) {
-    url += '&departmentId=' + deptId;
+function renderReportMessage(containerId, message) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+  const hint = document.createElement('div');
+  hint.className = 'empty-hint';
+  hint.textContent = message || '请求失败';
+  container.appendChild(hint);
+}
+
+function setReportButtonBusy(buttonId, busy, busyText) {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+  if (!button.dataset.defaultText) {
+    button.dataset.defaultText = button.textContent || '';
   }
+  button.disabled = !!busy;
+  button.textContent = busy ? busyText : button.dataset.defaultText;
+}
+
+function getReportDateValue() {
+  const dateInput = document.getElementById('reportDate');
+  return dateInput && dateInput.value ? dateInput.value : new Date().toISOString().slice(0, 10);
+}
+
+async function loadDailyReport() {
+  setReportButtonBusy('loadDailyReport', true, '加载中...');
+  renderReportMessage('dailyReportTable', '正在加载报表...');
   try {
+    const date = getReportDateValue();
+    const departmentSelect = document.getElementById('reportDepartment');
+    const deptId = departmentSelect ? departmentSelect.value : '';
+    let url = '/api/v1/admin/reports/daily?date=' + encodeURIComponent(date);
+    if (deptId && Number(deptId) > 0) {
+      url += '&departmentId=' + encodeURIComponent(deptId);
+    }
     const data = await fetchJSON(url);
     renderDailyReport(data.items || []);
   } catch (error) {
-    document.getElementById('dailyReportTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
+    renderReportMessage('dailyReportTable', error && error.message ? error.message : '请求失败');
+  } finally {
+    setReportButtonBusy('loadDailyReport', false, '');
   }
 }
 
@@ -1527,14 +1761,15 @@ function renderDailyReport(items) {
 }
 
 async function exportDaily() {
-  const dateInput = document.getElementById('reportDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
-  const deptId = document.getElementById('reportDepartment').value;
-  let url = '/api/v1/admin/exports/daily.xlsx?date=' + encodeURIComponent(date);
-  if (deptId && Number(deptId) > 0) {
-    url += '&departmentId=' + deptId;
-  }
+  setReportButtonBusy('exportDaily', true, '导出中...');
   try {
+    const date = getReportDateValue();
+    const departmentSelect = document.getElementById('reportDepartment');
+    const deptId = departmentSelect ? departmentSelect.value : '';
+    let url = '/api/v1/admin/exports/daily.xlsx?date=' + encodeURIComponent(date);
+    if (deptId && Number(deptId) > 0) {
+      url += '&departmentId=' + encodeURIComponent(deptId);
+    }
     const blob = await fetchBlob(url);
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -1544,7 +1779,9 @@ async function exportDaily() {
     link.remove();
     URL.revokeObjectURL(link.href);
   } catch (error) {
-    document.getElementById('dailyReportTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
+    renderReportMessage('dailyReportTable', error && error.message ? error.message : '导出失败');
+  } finally {
+    setReportButtonBusy('exportDaily', false, '');
   }
 }
 
@@ -1717,14 +1954,19 @@ function renderTimeline(items) {
 }
 
 async function loadRank() {
-  const dateInput = document.getElementById('reportDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
+  setReportButtonBusy('loadRank', true, '加载中...');
+  renderReportMessage('rankWorkTable', '正在加载排行...');
+  renderReportMessage('rankFishTable', '正在加载排行...');
   try {
+    const date = getReportDateValue();
     const data = await fetchJSON('/api/v1/admin/reports/rank?date=' + encodeURIComponent(date));
     renderRankTables(data);
   } catch (error) {
-    document.getElementById('rankWorkTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
-    document.getElementById('rankFishTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
+    const message = error && error.message ? error.message : '请求失败';
+    renderReportMessage('rankWorkTable', message);
+    renderReportMessage('rankFishTable', message);
+  } finally {
+    setReportButtonBusy('loadRank', false, '');
   }
 }
 
@@ -3575,6 +3817,7 @@ async function initApp() {
   timezoneValue.textContent = (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local');
   setDefaultDates();
   await loadSettings();
+  await loadHistoryCleanupStatus();
   await loadDepartments();
   await loadEmployees();
   await loadAdminUsers();
@@ -3603,23 +3846,36 @@ document.getElementById('loginPassword').addEventListener('keydown', (event) => 
 });
 
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
-['idleThreshold', 'heartbeatInterval', 'offlineThreshold', 'fishRatioWarn'].forEach((id) => {
+['idleThreshold', 'heartbeatInterval', 'offlineThreshold', 'fishRatioWarn', 'historyRetentionDays', 'historyCleanupHour'].forEach((id) => {
   const input = document.getElementById(id);
   if (input) {
     input.addEventListener('input', renderSettingsWarnings);
     input.addEventListener('change', renderSettingsWarnings);
   }
 });
+document.getElementById('historyRetentionDays').addEventListener('input', updateHistoryCleanupButtonLabel);
+document.getElementById('runHistoryCleanup').addEventListener('click', runHistoryCleanup);
+document.getElementById('cancelHistoryCleanup').addEventListener('click', cancelHistoryCleanup);
 document.getElementById('refreshRules').addEventListener('click', loadRules);
 document.getElementById('createRule').addEventListener('click', submitRule);
 document.getElementById('cancelRule').addEventListener('click', resetRuleForm);
 
+const loadDailyReportBtn = document.getElementById('loadDailyReport');
+if (loadDailyReportBtn) {
+  loadDailyReportBtn.addEventListener('click', loadDailyReport);
+}
+const exportDailyBtn = document.getElementById('exportDaily');
+if (exportDailyBtn) {
+  exportDailyBtn.addEventListener('click', exportDaily);
+}
+const loadRankBtn = document.getElementById('loadRank');
+if (loadRankBtn) {
+  loadRankBtn.addEventListener('click', loadRank);
+}
+
 initDepartmentSelectSearches();
 bindLiveDashboardEvents();
 
-
-document.getElementById('loadDailyReport').addEventListener('click', loadDailyReport);
-document.getElementById('exportDaily').addEventListener('click', exportDaily);
 const exportEmployeesBtn = document.getElementById('exportEmployees');
 if (exportEmployeesBtn) {
   exportEmployeesBtn.addEventListener('click', exportEmployees);
@@ -3642,7 +3898,6 @@ if (timelineTable) {
     btn.textContent = shouldShow ? '收起' : '展开';
   });
 }
-document.getElementById('loadRank').addEventListener('click', loadRank);
 
 document.getElementById('createAdjustment').addEventListener('click', submitAdjustment);
 document.getElementById('cancelAdjustment').addEventListener('click', resetAdjustmentForm);

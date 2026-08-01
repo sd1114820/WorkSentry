@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS settings (
   update_policy TINYINT NOT NULL DEFAULT 0,
   latest_version VARCHAR(32) NULL,
   update_url VARCHAR(255) NULL,
+  history_cleanup_enabled TINYINT NOT NULL DEFAULT 0,
+  history_retention_days INT NOT NULL DEFAULT 40,
+  history_cleanup_hour TINYINT NOT NULL DEFAULT 3,
+  history_cleanup_last_run_at DATETIME NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

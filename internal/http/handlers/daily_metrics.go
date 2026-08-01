@@ -36,23 +36,13 @@ func buildDailyReportMetrics(normalSeconds int64, fishSeconds int64, idleSeconds
 
 func buildDailyStatsByDateParams(date time.Time, departmentID int64) sqlc.ListDailyStatsByDateParams {
 	dayStart, _, reportEnd := reportDayBounds(date)
-	reportEndNull := sql.NullTime{Time: reportEnd, Valid: true}
-	dayStartNull := sql.NullTime{Time: dayStart, Valid: true}
 
 	return sqlc.ListDailyStatsByDateParams{
-		GREATEST:     dayStart,
-		LEAST:        reportEnd,
-		StartAt:      reportEnd,
-		EndAt:        dayStart,
-		GREATEST_2:   dayStart,
-		Column6:      reportEnd,
-		LEAST_2:      reportEnd,
-		StartAt_2:    reportEnd,
-		EndAt_2:      reportEndNull,
-		EndAt_3:      dayStartNull,
-		StatDate:     date,
-		Column12:     departmentID,
-		DepartmentID: toNullInt64(departmentID),
+		DayStart:           dayStart,
+		ReportEnd:          reportEnd,
+		StatDate:           date,
+		DepartmentIDFilter: departmentID,
+		DepartmentID:       toNullInt64(departmentID),
 	}
 }
 

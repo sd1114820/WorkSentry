@@ -31,30 +31,34 @@ SELECT ds.stat_date,
        ds.offline_seconds,
        ds.attendance_seconds,
        ds.effective_seconds,
-       CAST(COALESCE(breaks.break_seconds, 0) AS SIGNED) AS break_seconds,
-       CAST(COALESCE(on_duty.on_duty_seconds, 0) AS SIGNED) AS on_duty_seconds
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ts.start_at, sqlc.arg(day_start)),
+           LEAST(ts.end_at, sqlc.arg(report_end))
+         ))
+         FROM time_segments ts
+         WHERE ts.employee_id = ds.employee_id
+           AND ts.status = 'break'
+           AND ts.start_at < sqlc.arg(report_end)
+           AND ts.end_at > sqlc.arg(day_start)
+       ), 0) AS SIGNED) AS break_seconds,
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ws.start_at, sqlc.arg(day_start)),
+           LEAST(COALESCE(ws.end_at, sqlc.arg(report_end)), sqlc.arg(report_end))
+         ))
+         FROM work_sessions ws
+         WHERE ws.employee_id = ds.employee_id
+           AND ws.start_at < sqlc.arg(report_end)
+           AND COALESCE(ws.end_at, sqlc.arg(report_end)) > sqlc.arg(day_start)
+       ), 0) AS SIGNED) AS on_duty_seconds
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
 LEFT JOIN departments d ON e.department_id = d.id
-LEFT JOIN (
-  SELECT ts.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ts.start_at, ?), LEAST(ts.end_at, ?))) AS break_seconds
-  FROM time_segments ts
-  WHERE ts.status = 'break'
-    AND ts.start_at < ?
-    AND ts.end_at > ?
-  GROUP BY ts.employee_id
-) breaks ON breaks.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ws.start_at, ?), LEAST(COALESCE(ws.end_at, ?), ?))) AS on_duty_seconds
-  FROM work_sessions ws
-  WHERE ws.start_at < ?
-    AND COALESCE(ws.end_at, ?) > ?
-  GROUP BY ws.employee_id
-) on_duty ON on_duty.employee_id = ds.employee_id
-WHERE ds.stat_date = ?
-  AND (? = 0 OR e.department_id = ?)
+WHERE ds.stat_date = sqlc.arg(stat_date)
+  AND (sqlc.arg(department_id_filter) = 0 OR e.department_id = sqlc.narg(department_id))
 ORDER BY ds.attendance_seconds DESC;
 
 -- name: ListDailyStatsForExportByDate :many

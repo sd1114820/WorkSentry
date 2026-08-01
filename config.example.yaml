@@ -3,6 +3,7 @@ server:
   read_timeout_seconds: 15
   write_timeout_seconds: 15
   idle_timeout_seconds: 60
+  report_query_timeout_seconds: 5
 
 database:
   dsn: "root:password@tcp(127.0.0.1:3306)/worksentry?parseTime=true&loc=Local&charset=utf8mb4"

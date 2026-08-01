@@ -16,6 +16,10 @@ type SettingsPayload struct {
 	UpdatePolicy             int32  `json:"updatePolicy"`
 	LatestVersion            string `json:"latestVersion"`
 	UpdateURL                string `json:"updateUrl"`
+	HistoryCleanupEnabled    bool   `json:"historyCleanupEnabled"`
+	HistoryRetentionDays     int32  `json:"historyRetentionDays"`
+	HistoryCleanupHour       int32  `json:"historyCleanupHour"`
+	HistoryCleanupLastRunAt  string `json:"historyCleanupLastRunAt,omitempty"`
 }
 
 func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +69,14 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "更新策略仅支持 0 或 1")
 		return
 	}
+	if payload.HistoryRetentionDays < 1 || payload.HistoryRetentionDays > 3650 {
+		writeError(w, http.StatusBadRequest, "历史数据保留天数必须在 1-3650 之间")
+		return
+	}
+	if payload.HistoryCleanupHour < 0 || payload.HistoryCleanupHour > 23 {
+		writeError(w, http.StatusBadRequest, "历史数据清理小时必须在 0-23 之间")
+		return
+	}
 
 	err := h.Queries.UpsertSettings(r.Context(), sqlc.UpsertSettingsParams{
 		IdleThresholdSeconds:     payload.IdleThresholdSeconds,
@@ -74,22 +86,16 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		UpdatePolicy:             int8(payload.UpdatePolicy),
 		LatestVersion:            toNullString(payload.LatestVersion),
 		UpdateUrl:                toNullString(payload.UpdateURL),
+		HistoryCleanupEnabled:    boolToInt8(payload.HistoryCleanupEnabled),
+		HistoryRetentionDays:     payload.HistoryRetentionDays,
+		HistoryCleanupHour:       int8(payload.HistoryCleanupHour),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "保存配置失败")
 		return
 	}
 
-	h.setSettingsCache(sqlc.Setting{
-		ID:                       1,
-		IdleThresholdSeconds:     payload.IdleThresholdSeconds,
-		HeartbeatIntervalSeconds: payload.HeartbeatIntervalSeconds,
-		OfflineThresholdSeconds:  payload.OfflineThresholdSeconds,
-		FishRatioWarnPercent:     payload.FishRatioWarnPercent,
-		UpdatePolicy:             int8(payload.UpdatePolicy),
-		LatestVersion:            toNullString(payload.LatestVersion),
-		UpdateUrl:                toNullString(payload.UpdateURL),
-	})
+	h.invalidateSettingsCache()
 
 	h.logAudit(r, "update_settings", "settings", sql.NullInt64{}, payload)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "保存成功"})
@@ -104,6 +110,10 @@ func (h *Handler) settingsView(settings sqlc.Setting) SettingsPayload {
 		UpdatePolicy:             int32(settings.UpdatePolicy),
 		LatestVersion:            nullString(settings.LatestVersion),
 		UpdateURL:                nullString(settings.UpdateUrl),
+		HistoryCleanupEnabled:    settings.HistoryCleanupEnabled > 0,
+		HistoryRetentionDays:     settings.HistoryRetentionDays,
+		HistoryCleanupHour:       int32(settings.HistoryCleanupHour),
+		HistoryCleanupLastRunAt:  formatNullTime(settings.HistoryCleanupLastRunAt),
 	}
 }
 
@@ -125,5 +135,23 @@ func defaultSettings() sqlc.Setting {
 		UpdatePolicy:             0,
 		LatestVersion:            sql.NullString{},
 		UpdateUrl:                sql.NullString{},
+		HistoryCleanupEnabled:    0,
+		HistoryRetentionDays:     40,
+		HistoryCleanupHour:       3,
+		HistoryCleanupLastRunAt:  sql.NullTime{},
 	}
+}
+
+func boolToInt8(value bool) int8 {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func formatNullTime(value sql.NullTime) string {
+	if !value.Valid {
+		return ""
+	}
+	return formatTime(value.Time)
 }

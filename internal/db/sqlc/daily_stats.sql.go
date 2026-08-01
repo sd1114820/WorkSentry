@@ -72,47 +72,43 @@ SELECT ds.stat_date,
        ds.offline_seconds,
        ds.attendance_seconds,
        ds.effective_seconds,
-       CAST(COALESCE(breaks.break_seconds, 0) AS SIGNED) AS break_seconds,
-       CAST(COALESCE(on_duty.on_duty_seconds, 0) AS SIGNED) AS on_duty_seconds
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ts.start_at, ?),
+           LEAST(ts.end_at, ?)
+         ))
+         FROM time_segments ts
+         WHERE ts.employee_id = ds.employee_id
+           AND ts.status = 'break'
+           AND ts.start_at < ?
+           AND ts.end_at > ?
+       ), 0) AS SIGNED) AS break_seconds,
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ws.start_at, ?),
+           LEAST(COALESCE(ws.end_at, ?), ?)
+         ))
+         FROM work_sessions ws
+         WHERE ws.employee_id = ds.employee_id
+           AND ws.start_at < ?
+           AND COALESCE(ws.end_at, ?) > ?
+       ), 0) AS SIGNED) AS on_duty_seconds
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
 LEFT JOIN departments d ON e.department_id = d.id
-LEFT JOIN (
-  SELECT ts.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ts.start_at, ?), LEAST(ts.end_at, ?))) AS break_seconds
-  FROM time_segments ts
-  WHERE ts.status = 'break'
-    AND ts.start_at < ?
-    AND ts.end_at > ?
-  GROUP BY ts.employee_id
-) breaks ON breaks.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ws.start_at, ?), LEAST(COALESCE(ws.end_at, ?), ?))) AS on_duty_seconds
-  FROM work_sessions ws
-  WHERE ws.start_at < ?
-    AND COALESCE(ws.end_at, ?) > ?
-  GROUP BY ws.employee_id
-) on_duty ON on_duty.employee_id = ds.employee_id
 WHERE ds.stat_date = ?
   AND (? = 0 OR e.department_id = ?)
 ORDER BY ds.attendance_seconds DESC
 `
 
 type ListDailyStatsByDateParams struct {
-	GREATEST     interface{}   `json:"GREATEST"`
-	LEAST        interface{}   `json:"LEAST"`
-	StartAt      time.Time     `json:"start_at"`
-	EndAt        time.Time     `json:"end_at"`
-	GREATEST_2   interface{}   `json:"GREATEST_2"`
-	Column6      interface{}   `json:"column_6"`
-	LEAST_2      interface{}   `json:"LEAST_2"`
-	StartAt_2    time.Time     `json:"start_at_2"`
-	EndAt_2      sql.NullTime  `json:"end_at_2"`
-	EndAt_3      sql.NullTime  `json:"end_at_3"`
-	StatDate     time.Time     `json:"stat_date"`
-	Column12     interface{}   `json:"column_12"`
-	DepartmentID sql.NullInt64 `json:"department_id"`
+	DayStart           time.Time     `json:"day_start"`
+	ReportEnd          time.Time     `json:"report_end"`
+	StatDate           time.Time     `json:"stat_date"`
+	DepartmentIDFilter int64         `json:"department_id_filter"`
+	DepartmentID       sql.NullInt64 `json:"department_id"`
 }
 
 type ListDailyStatsByDateRow struct {
@@ -133,18 +129,18 @@ type ListDailyStatsByDateRow struct {
 
 func (q *Queries) ListDailyStatsByDate(ctx context.Context, arg ListDailyStatsByDateParams) ([]ListDailyStatsByDateRow, error) {
 	rows, err := q.db.QueryContext(ctx, listDailyStatsByDate,
-		arg.GREATEST,
-		arg.LEAST,
-		arg.StartAt,
-		arg.EndAt,
-		arg.GREATEST_2,
-		arg.Column6,
-		arg.LEAST_2,
-		arg.StartAt_2,
-		arg.EndAt_2,
-		arg.EndAt_3,
+		arg.DayStart,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.DayStart,
+		arg.DayStart,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.DayStart,
 		arg.StatDate,
-		arg.Column12,
+		arg.DepartmentIDFilter,
 		arg.DepartmentID,
 	)
 	if err != nil {

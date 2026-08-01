@@ -23,6 +23,8 @@ var migrations = []Migration{
 	{Version: 5, Name: "perf_indexes", Run: migrate005PerfIndexes},
 	{Version: 6, Name: "storage_growth_optimization", Run: migrate006StorageGrowthOptimization},
 	{Version: 7, Name: "ingest_outbox", Run: migrate007IngestOutbox},
+	{Version: 8, Name: "history_cleanup_indexes", Run: migrate008HistoryCleanupCompatibility},
+	{Version: 9, Name: "history_cleanup_settings", Run: migrate009HistoryCleanupSettings},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -201,6 +203,18 @@ func isMigrationAlreadyPresent(ctx context.Context, db *sql.DB, version int64) (
 			indexCheck{Table: "raw_events", Index: "idx_raw_events_ingest"},
 			indexCheck{Table: "raw_events", Index: "idx_raw_events_source_event"},
 		)
+	case 8:
+		// 旧版第八版迁移会在服务监听端口前给大表建索引，可能导致长时间网关错误。
+		// 新版保留版本号兼容已部署数据库，但不再于启动阶段执行重型建索引。
+		return true, nil
+	case 9:
+		for _, column := range []string{"history_cleanup_enabled", "history_retention_days", "history_cleanup_hour", "history_cleanup_last_run_at"} {
+			ready, err := columnExists(ctx, db, "settings", column)
+			if err != nil || !ready {
+				return ready, err
+			}
+		}
+		return true, nil
 	default:
 		return false, nil
 	}
@@ -295,6 +309,10 @@ func migrate001Init(ctx context.Context, db *sql.DB) error {
   update_policy TINYINT NOT NULL DEFAULT 0,
   latest_version VARCHAR(32) NULL,
   update_url VARCHAR(255) NULL,
+  history_cleanup_enabled TINYINT NOT NULL DEFAULT 0,
+  history_retention_days INT NOT NULL DEFAULT 40,
+  history_cleanup_hour TINYINT NOT NULL DEFAULT 3,
+  history_cleanup_last_run_at DATETIME NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS raw_events (
@@ -583,6 +601,28 @@ func migrate007IngestOutbox(ctx context.Context, db *sql.DB) error {
 	}
 	for _, index := range indexes {
 		if err := ensureIndex(ctx, db, index.table, index.index, index.statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrate008HistoryCleanupCompatibility(context.Context, *sql.DB) error {
+	return nil
+}
+
+func migrate009HistoryCleanupSettings(ctx context.Context, db *sql.DB) error {
+	columns := []struct {
+		name      string
+		statement string
+	}{
+		{"history_cleanup_enabled", `ALTER TABLE settings ADD COLUMN history_cleanup_enabled TINYINT NOT NULL DEFAULT 0 AFTER update_url`},
+		{"history_retention_days", `ALTER TABLE settings ADD COLUMN history_retention_days INT NOT NULL DEFAULT 40 AFTER history_cleanup_enabled`},
+		{"history_cleanup_hour", `ALTER TABLE settings ADD COLUMN history_cleanup_hour TINYINT NOT NULL DEFAULT 3 AFTER history_retention_days`},
+		{"history_cleanup_last_run_at", `ALTER TABLE settings ADD COLUMN history_cleanup_last_run_at DATETIME NULL AFTER history_cleanup_hour`},
+	}
+	for _, column := range columns {
+		if err := ensureColumn(ctx, db, "settings", column.name, column.statement); err != nil {
 			return err
 		}
 	}

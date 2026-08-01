@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -33,6 +34,10 @@ type Handler struct {
 	rulesCache    []sqlc.ListEnabledRulesRow
 	rulesCachedAt time.Time
 	rulesCacheOK  bool
+
+	historyCleanupMu     sync.RWMutex
+	historyCleanupState  HistoryCleanupStatus
+	historyCleanupCancel context.CancelFunc
 }
 
 func NewHandler(cfg *config.Config, db sqlc.DBTX) *Handler {
@@ -166,6 +171,14 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func newErrorReference() string {
+	token, err := generateToken()
+	if err == nil && len(token) >= 12 {
+		return token[:12]
+	}
+	return fmt.Sprintf("%x", time.Now().UnixNano())
 }
 
 func statusLabel(status string) string {

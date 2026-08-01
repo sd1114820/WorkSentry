@@ -11,7 +11,8 @@ import (
 )
 
 const getSettings = `-- name: GetSettings :one
-SELECT id, idle_threshold_seconds, heartbeat_interval_seconds, offline_threshold_seconds, fish_ratio_warn_percent, update_policy, latest_version, update_url, updated_at
+SELECT id, idle_threshold_seconds, heartbeat_interval_seconds, offline_threshold_seconds, fish_ratio_warn_percent, update_policy, latest_version, update_url,
+       history_cleanup_enabled, history_retention_days, history_cleanup_hour, history_cleanup_last_run_at, updated_at
 FROM settings
 WHERE id = 1
 `
@@ -28,6 +29,10 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.UpdatePolicy,
 		&i.LatestVersion,
 		&i.UpdateUrl,
+		&i.HistoryCleanupEnabled,
+		&i.HistoryRetentionDays,
+		&i.HistoryCleanupHour,
+		&i.HistoryCleanupLastRunAt,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -43,9 +48,12 @@ INSERT INTO settings (
   update_policy,
   latest_version,
   update_url,
+  history_cleanup_enabled,
+  history_retention_days,
+  history_cleanup_hour,
   updated_at
 ) VALUES (
-  1, ?, ?, ?, ?, ?, ?, ?, NOW()
+  1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
 )
 ON DUPLICATE KEY UPDATE
   idle_threshold_seconds = VALUES(idle_threshold_seconds),
@@ -55,6 +63,9 @@ ON DUPLICATE KEY UPDATE
   update_policy = VALUES(update_policy),
   latest_version = VALUES(latest_version),
   update_url = VALUES(update_url),
+  history_cleanup_enabled = VALUES(history_cleanup_enabled),
+  history_retention_days = VALUES(history_retention_days),
+  history_cleanup_hour = VALUES(history_cleanup_hour),
   updated_at = NOW()
 `
 
@@ -66,6 +77,9 @@ type UpsertSettingsParams struct {
 	UpdatePolicy             int8           `json:"update_policy"`
 	LatestVersion            sql.NullString `json:"latest_version"`
 	UpdateUrl                sql.NullString `json:"update_url"`
+	HistoryCleanupEnabled    int8           `json:"history_cleanup_enabled"`
+	HistoryRetentionDays     int32          `json:"history_retention_days"`
+	HistoryCleanupHour       int8           `json:"history_cleanup_hour"`
 }
 
 func (q *Queries) UpsertSettings(ctx context.Context, arg UpsertSettingsParams) error {
@@ -77,6 +91,9 @@ func (q *Queries) UpsertSettings(ctx context.Context, arg UpsertSettingsParams) 
 		arg.UpdatePolicy,
 		arg.LatestVersion,
 		arg.UpdateUrl,
+		arg.HistoryCleanupEnabled,
+		arg.HistoryRetentionDays,
+		arg.HistoryCleanupHour,
 	)
 	return err
 }

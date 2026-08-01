@@ -4,7 +4,7 @@
   <meta charset='utf-8' />
   <meta name='viewport' content='width=device-width, initial-scale=1' />
   <title>WorkSentry 管理端</title>
-  <link rel='stylesheet' href='/assets/app.css?v=20260305-1' />
+  <link rel='stylesheet' href='/assets/app.css?v=20260801-7' />
 </head>
 <body>
   <div class='auth-modal' id='authModal'>
@@ -204,8 +204,49 @@
               <div class='config-warning-title'>配置提示</div>
               <ul id='settingsWarningList'></ul>
             </div>
+            <div class='history-cleanup-panel'>
+              <h4>历史数据清理</h4>
+              <p class='muted'>服务启动时不会清理。可以手动执行，也可以保存为每日定时任务。</p>
+              <div class='form-grid'>
+                <label class='inline'>
+                  <input type='checkbox' id='historyCleanupEnabled' />
+                  <span>启用每日定时清理</span>
+                </label>
+                <label>
+                  <span>保留天数</span>
+                  <input type='number' id='historyRetentionDays' min='1' max='3650' step='1' value='40' />
+                </label>
+                <label>
+                  <span>每日执行小时（0-23）</span>
+                  <input type='number' id='historyCleanupHour' min='0' max='23' step='1' value='3' />
+                </label>
+              </div>
+              <div class='form-actions'>
+                <button type='button' class='btn btn-secondary' id='runHistoryCleanup'>立即清理 40 天前数据</button>
+                <button type='button' class='btn btn-danger' id='cancelHistoryCleanup' disabled>停止清理</button>
+                <span class='form-status' id='historyCleanupStatus'>尚未执行</span>
+              </div>
+              <div class='history-cleanup-progress is-hidden' id='historyCleanupProgress' aria-live='polite'>
+                <div class='history-cleanup-progress-header'>
+                  <strong id='historyCleanupCurrentTarget'>正在准备</strong>
+                  <span id='historyCleanupTargetCount'>已完成 0/0 项</span>
+                </div>
+                <div class='history-cleanup-progress-track' id='historyCleanupProgressTrack'>
+                  <span id='historyCleanupProgressFill'></span>
+                </div>
+                <div class='history-cleanup-progress-metrics'>
+                  <span>累计删除 <strong id='historyCleanupDeleted'>0</strong> 条</span>
+                  <span>待清理 <strong id='historyCleanupCandidates'>统计中</strong></span>
+                  <span>删除进度 <strong id='historyCleanupPercent'>0%</strong></span>
+                  <span>当前项目 <strong id='historyCleanupTargetDeleted'>0</strong> 条</span>
+                  <span>已执行 <strong id='historyCleanupElapsed'>0 秒</strong></span>
+                </div>
+                <div class='history-cleanup-progress-detail' id='historyCleanupEmployeeProgress'></div>
+                <div class='history-cleanup-progress-detail' id='historyCleanupDetails'></div>
+              </div>
+            </div>
             <div class='form-actions'>
-              <button class='btn btn-primary' id='saveSettings'>保存配置</button>
+              <button type='button' class='btn btn-primary' id='saveSettings'>保存配置</button>
               <span class='form-status' id='settingsStatus'></span>
             </div>
           </div>
@@ -275,8 +316,8 @@
               </label>
             </div>
             <div class='form-actions'>
-              <button class='btn btn-secondary' id='loadDailyReport'>加载报表</button>
-              <button class='btn btn-secondary' id='exportDaily'>导出 Excel</button>
+              <button type='button' class='btn btn-secondary' id='loadDailyReport'>加载报表</button>
+              <button type='button' class='btn btn-secondary' id='exportDaily'>导出 Excel</button>
             </div>
             <div class='table' id='dailyReportTable'></div>
           </div>
@@ -306,7 +347,7 @@
         <div class='card'>
           <h3>团队排行</h3>
           <div class='form-actions'>
-            <button class='btn btn-secondary' id='loadRank'>刷新排行</button>
+            <button type='button' class='btn btn-secondary' id='loadRank'>刷新排行</button>
           </div>
           <div class='grid-2'>
             <div>
@@ -845,14 +886,6 @@
     </div>
   </div>
 
-  <script src='/assets/app.js?v=20260308-1'></script>
+    <script src='/assets/app.js?v=20260801-7'></script>
 </body>
 </html>
-
-
-
-
-
-
-
-

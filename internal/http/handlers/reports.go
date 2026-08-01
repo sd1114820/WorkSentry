@@ -3,7 +3,6 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -74,12 +73,15 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, departmentID))
+	queryStartedAt := time.Now()
+	queryCtx, cancelQuery, queryTimeout := h.reportQueryContext(r.Context())
+	rows, err := h.Queries.ListDailyStatsByDate(queryCtx, buildDailyStatsByDateParams(date, departmentID))
+	cancelQuery()
 	if err != nil {
-		log.Printf("读取日报失败: %v", err)
-		writeError(w, http.StatusInternalServerError, "读取报表失败")
+		h.writeReportQueryError(w, "日统计汇总", fmt.Sprintf("日期=%s 部门编号=%d", dateValue, departmentID), err, queryStartedAt, queryTimeout)
 		return
 	}
+	logReportQuerySuccess("日统计汇总", fmt.Sprintf("日期=%s 部门编号=%d", dateValue, departmentID), len(rows), queryStartedAt)
 
 	items := make([]DailyReportView, 0, len(rows))
 	for _, row := range rows {
@@ -213,12 +215,15 @@ func (h *Handler) ReportRank(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	rows, err := h.Queries.ListDailyStatsByDate(r.Context(), buildDailyStatsByDateParams(date, 0))
+	queryStartedAt := time.Now()
+	queryCtx, cancelQuery, queryTimeout := h.reportQueryContext(r.Context())
+	rows, err := h.Queries.ListDailyStatsByDate(queryCtx, buildDailyStatsByDateParams(date, 0))
+	cancelQuery()
 	if err != nil {
-		log.Printf("读取团队排行失败: %v", err)
-		writeError(w, http.StatusInternalServerError, "读取排行失败")
+		h.writeReportQueryError(w, "团队排行", fmt.Sprintf("日期=%s", dateValue), err, queryStartedAt, queryTimeout)
 		return
 	}
+	logReportQuerySuccess("团队排行", fmt.Sprintf("日期=%s", dateValue), len(rows), queryStartedAt)
 
 	workList := make([]rankValue, 0, len(rows))
 	fishList := make([]rankValue, 0, len(rows))

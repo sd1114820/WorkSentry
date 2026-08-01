@@ -142,6 +142,61 @@ button, input, select, textarea {
   background: rgba(15, 23, 42, 0.6);
 }
 
+.history-cleanup-progress {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.history-cleanup-progress.is-hidden {
+  display: none;
+}
+
+.history-cleanup-progress-header,
+.history-cleanup-progress-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.history-cleanup-progress-header span,
+.history-cleanup-progress-metrics,
+.history-cleanup-progress-detail {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.history-cleanup-progress-track {
+  position: relative;
+  height: 8px;
+  margin: 12px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.history-cleanup-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-success);
+  transition: width 250ms ease;
+}
+
+.history-cleanup-progress-track.is-running span {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.55);
+}
+
+.history-cleanup-progress-detail {
+  margin-top: var(--space-sm);
+  line-height: 1.6;
+}
+
 .main {
   padding: var(--space-xl) var(--space-2xl);
 }
@@ -274,6 +329,16 @@ button, input, select, textarea {
 
 .btn-secondary:hover {
   background: rgba(99, 102, 241, 0.18);
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: var(--color-danger);
+  color: #fecaca;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.24);
 }
 
 .grid-2 {
@@ -413,6 +478,16 @@ button, input, select, textarea {
 
 .config-warning.is-hidden {
   display: none;
+}
+
+.history-cleanup-panel {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.history-cleanup-panel h4 {
+  margin: 0;
 }
 
 .form-status {
@@ -1316,4 +1391,3 @@ button, input, select, textarea {
 .live-filter-row .dept-search-input {
   min-width: 0;
 }
-

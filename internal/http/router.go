@@ -26,6 +26,7 @@ func NewRouter(h *handlers.Handler) http.Handler {
 	mux.HandleFunc("/api/v1/admin/admin-users", adminOnly(h.AdminUsers))
 	mux.HandleFunc("/api/v1/admin/password", adminOnly(h.AdminChangePassword))
 	mux.HandleFunc("/api/v1/admin/settings", adminOnly(h.Settings))
+	mux.HandleFunc("/api/v1/admin/history-cleanup", adminOnly(h.HistoryCleanup))
 	mux.HandleFunc("/api/v1/admin/rules", adminOnly(h.Rules))
 	mux.HandleFunc("/api/v1/admin/live-snapshot", adminOnly(h.LiveSnapshot))
 	mux.HandleFunc("/api/v1/admin/reports/daily", adminOnly(h.ReportDaily))

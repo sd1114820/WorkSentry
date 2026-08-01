@@ -15,10 +15,11 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr                string `yaml:"addr"`
-	ReadTimeoutSeconds  int    `yaml:"read_timeout_seconds"`
-	WriteTimeoutSeconds int    `yaml:"write_timeout_seconds"`
-	IdleTimeoutSeconds  int    `yaml:"idle_timeout_seconds"`
+	Addr                      string `yaml:"addr"`
+	ReadTimeoutSeconds        int    `yaml:"read_timeout_seconds"`
+	WriteTimeoutSeconds       int    `yaml:"write_timeout_seconds"`
+	IdleTimeoutSeconds        int    `yaml:"idle_timeout_seconds"`
+	ReportQueryTimeoutSeconds int    `yaml:"report_query_timeout_seconds"`
 }
 
 type DatabaseConfig struct {
@@ -67,6 +68,9 @@ func Load(path string) (*Config, error) {
 	if cfg.Database.RawEventsRetentionDays <= 0 {
 		cfg.Database.RawEventsRetentionDays = 3
 	}
+	if cfg.Server.ReportQueryTimeoutSeconds <= 0 {
+		cfg.Server.ReportQueryTimeoutSeconds = 5
+	}
 
 	return &cfg, nil
 }
@@ -74,10 +78,11 @@ func Load(path string) (*Config, error) {
 func defaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			Addr:                ":8080",
-			ReadTimeoutSeconds:  15,
-			WriteTimeoutSeconds: 15,
-			IdleTimeoutSeconds:  60,
+			Addr:                      ":8080",
+			ReadTimeoutSeconds:        15,
+			WriteTimeoutSeconds:       15,
+			IdleTimeoutSeconds:        60,
+			ReportQueryTimeoutSeconds: 5,
 		},
 		Database: DatabaseConfig{
 			RawEventsRetentionDays: 3,

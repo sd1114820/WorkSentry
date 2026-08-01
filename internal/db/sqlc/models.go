@@ -646,6 +646,10 @@ type Setting struct {
 	UpdatePolicy             int8           `json:"update_policy"`
 	LatestVersion            sql.NullString `json:"latest_version"`
 	UpdateUrl                sql.NullString `json:"update_url"`
+	HistoryCleanupEnabled    int8           `json:"history_cleanup_enabled"`
+	HistoryRetentionDays     int32          `json:"history_retention_days"`
+	HistoryCleanupHour       int8           `json:"history_cleanup_hour"`
+	HistoryCleanupLastRunAt  sql.NullTime   `json:"history_cleanup_last_run_at"`
 	UpdatedAt                time.Time      `json:"updated_at"`
 }
 
