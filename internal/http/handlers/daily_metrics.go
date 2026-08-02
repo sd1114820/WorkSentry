@@ -48,28 +48,14 @@ func buildDailyStatsByDateParams(date time.Time, departmentID int64) sqlc.ListDa
 
 func buildDailyStatsExportParams(date time.Time, departmentID int64) sqlc.ListDailyStatsForExportByDateParams {
 	dayStart, dayEnd, reportEnd := reportDayBounds(date)
-	reportEndNull := sql.NullTime{Time: reportEnd, Valid: true}
-	dayStartNull := sql.NullTime{Time: dayStart, Valid: true}
-	dayEndNull := sql.NullTime{Time: dayEnd, Valid: true}
 
 	return sqlc.ListDailyStatsForExportByDateParams{
-		GREATEST:     dayStart,
-		LEAST:        reportEnd,
-		StartAt:      reportEnd,
-		EndAt:        dayStart,
-		GREATEST_2:   dayStart,
-		Column6:      reportEnd,
-		LEAST_2:      reportEnd,
-		StartAt_2:    reportEnd,
-		EndAt_2:      reportEndNull,
-		EndAt_3:      dayStartNull,
-		StartAt_3:    dayStart,
-		StartAt_4:    dayEnd,
-		EndAt_4:      dayStartNull,
-		EndAt_5:      dayEndNull,
-		StatDate:     date,
-		Column16:     departmentID,
-		DepartmentID: toNullInt64(departmentID),
+		DayStart:           dayStart,
+		ReportEnd:          reportEnd,
+		DayEnd:             dayEnd,
+		StatDate:           date,
+		DepartmentIDFilter: departmentID,
+		DepartmentID:       toNullInt64(departmentID),
 	}
 }
 

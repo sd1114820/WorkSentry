@@ -47,13 +47,15 @@ SELECT ts.employee_id,
        d.name AS department_name,
        ts.start_at,
        ts.end_at
-FROM time_segments ts
-JOIN employees e ON ts.employee_id = e.id
+FROM employees e
+STRAIGHT_JOIN time_segments ts
+  ON ts.employee_id = e.id
+ AND ts.status = 'offline'
+ AND ts.start_at < sqlc.arg(range_end)
+ AND ts.end_at > sqlc.arg(range_start)
 LEFT JOIN departments d ON e.department_id = d.id
-WHERE ts.status = 'offline'
-  AND ts.start_at < ?
-  AND ts.end_at > ?
-ORDER BY ts.start_at;
+WHERE (sqlc.arg(employee_code_filter) = '' OR e.employee_code = sqlc.arg(employee_code))
+ORDER BY e.employee_code, ts.start_at;
 
 -- name: CountNonOfflineSegmentsOverlap :one
 SELECT COUNT(1)

@@ -9,19 +9,14 @@ import (
 	"time"
 )
 
-const defaultReportQueryTimeout = 5 * time.Second
+const defaultReportQueryTimeout = 2 * time.Minute
 
 func (h *Handler) reportQueryContext(parent context.Context) (context.Context, context.CancelFunc, time.Duration) {
 	timeout := defaultReportQueryTimeout
 	if h.Config != nil && h.Config.Server.ReportQueryTimeoutSeconds > 0 {
-		timeout = time.Duration(h.Config.Server.ReportQueryTimeoutSeconds) * time.Second
-	}
-
-	// 查询必须早于服务响应超时结束，否则无法把明确的错误返回给页面。
-	if h.Config != nil && h.Config.Server.WriteTimeoutSeconds > 2 {
-		writeLimit := time.Duration(h.Config.Server.WriteTimeoutSeconds-2) * time.Second
-		if timeout > writeLimit {
-			timeout = writeLimit
+		configuredTimeout := time.Duration(h.Config.Server.ReportQueryTimeoutSeconds) * time.Second
+		if configuredTimeout > timeout {
+			timeout = configuredTimeout
 		}
 	}
 

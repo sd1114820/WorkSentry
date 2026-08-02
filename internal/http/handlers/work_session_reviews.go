@@ -587,6 +587,10 @@ LEFT JOIN work_sessions ws ON r.work_session_id = ws.id ` + where + ` ORDER BY r
 			ReasonStatus:     reasonStatus,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "读取考核记录失败")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, WorkSessionReviewListResponse{
 		Total: total,

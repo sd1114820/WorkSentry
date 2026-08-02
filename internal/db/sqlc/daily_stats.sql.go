@@ -78,7 +78,7 @@ SELECT ds.stat_date,
            GREATEST(ts.start_at, ?),
            LEAST(ts.end_at, ?)
          ))
-         FROM time_segments ts
+         FROM time_segments ts FORCE INDEX (idx_time_segments_employee_end)
          WHERE ts.employee_id = ds.employee_id
            AND ts.status = 'break'
            AND ts.start_at < ?
@@ -90,10 +90,10 @@ SELECT ds.stat_date,
            GREATEST(ws.start_at, ?),
            LEAST(COALESCE(ws.end_at, ?), ?)
          ))
-         FROM work_sessions ws
+         FROM work_sessions ws FORCE INDEX (idx_work_sessions_employee_end)
          WHERE ws.employee_id = ds.employee_id
            AND ws.start_at < ?
-           AND COALESCE(ws.end_at, ?) > ?
+           AND (ws.end_at IS NULL OR ws.end_at > ?)
        ), 0) AS SIGNED) AS on_duty_seconds
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
@@ -137,7 +137,6 @@ func (q *Queries) ListDailyStatsByDate(ctx context.Context, arg ListDailyStatsBy
 		arg.ReportEnd,
 		arg.ReportEnd,
 		arg.ReportEnd,
-		arg.ReportEnd,
 		arg.DayStart,
 		arg.StatDate,
 		arg.DepartmentIDFilter,
@@ -178,6 +177,58 @@ func (q *Queries) ListDailyStatsByDate(ctx context.Context, arg ListDailyStatsBy
 	return items, nil
 }
 
+const listDailyStatsForRankByDate = `-- name: ListDailyStatsForRankByDate :many
+SELECT e.employee_code,
+       e.name,
+       d.name AS department_name,
+       ds.fish_seconds,
+       ds.attendance_seconds,
+       ds.effective_seconds
+FROM daily_stats ds
+JOIN employees e ON ds.employee_id = e.id
+LEFT JOIN departments d ON e.department_id = d.id
+WHERE ds.stat_date = ?
+`
+
+type ListDailyStatsForRankByDateRow struct {
+	EmployeeCode      string         `json:"employee_code"`
+	Name              string         `json:"name"`
+	DepartmentName    sql.NullString `json:"department_name"`
+	FishSeconds       int32          `json:"fish_seconds"`
+	AttendanceSeconds int32          `json:"attendance_seconds"`
+	EffectiveSeconds  int32          `json:"effective_seconds"`
+}
+
+func (q *Queries) ListDailyStatsForRankByDate(ctx context.Context, statDate time.Time) ([]ListDailyStatsForRankByDateRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDailyStatsForRankByDate, statDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDailyStatsForRankByDateRow
+	for rows.Next() {
+		var i ListDailyStatsForRankByDateRow
+		if err := rows.Scan(
+			&i.EmployeeCode,
+			&i.Name,
+			&i.DepartmentName,
+			&i.FishSeconds,
+			&i.AttendanceSeconds,
+			&i.EffectiveSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDailyStatsForExportByDate = `-- name: ListDailyStatsForExportByDate :many
 SELECT ds.stat_date,
        e.employee_code,
@@ -190,70 +241,58 @@ SELECT ds.stat_date,
        ds.offline_seconds,
        ds.attendance_seconds,
        ds.effective_seconds,
-       CAST(COALESCE(breaks.break_seconds, 0) AS SIGNED) AS break_seconds,
-       CAST(COALESCE(on_duty.on_duty_seconds, 0) AS SIGNED) AS on_duty_seconds,
-       ws_start.first_start_at,
-       ws_end.last_end_at
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ts.start_at, ?),
+           LEAST(ts.end_at, ?)
+         ))
+         FROM time_segments ts FORCE INDEX (idx_time_segments_employee_end)
+         WHERE ts.employee_id = ds.employee_id
+           AND ts.status = 'break'
+           AND ts.start_at < ?
+           AND ts.end_at > ?
+       ), 0) AS SIGNED) AS break_seconds,
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ws.start_at, ?),
+           LEAST(COALESCE(ws.end_at, ?), ?)
+         ))
+         FROM work_sessions ws FORCE INDEX (idx_work_sessions_employee_end)
+         WHERE ws.employee_id = ds.employee_id
+           AND ws.start_at < ?
+           AND (ws.end_at IS NULL OR ws.end_at > ?)
+       ), 0) AS SIGNED) AS on_duty_seconds,
+       (
+         SELECT MIN(ws_start.start_at)
+         FROM work_sessions ws_start FORCE INDEX (idx_work_sessions_employee_start)
+         WHERE ws_start.employee_id = ds.employee_id
+           AND ws_start.start_at >= ?
+           AND ws_start.start_at < ?
+       ) AS first_start_at,
+       (
+         SELECT MAX(ws_end.end_at)
+         FROM work_sessions ws_end FORCE INDEX (idx_work_sessions_employee_end)
+         WHERE ws_end.employee_id = ds.employee_id
+           AND ws_end.end_at >= ?
+           AND ws_end.end_at < ?
+       ) AS last_end_at
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
 LEFT JOIN departments d ON e.department_id = d.id
-LEFT JOIN (
-  SELECT ts.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ts.start_at, ?), LEAST(ts.end_at, ?))) AS break_seconds
-  FROM time_segments ts
-  WHERE ts.status = 'break'
-    AND ts.start_at < ?
-    AND ts.end_at > ?
-  GROUP BY ts.employee_id
-) breaks ON breaks.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ws.start_at, ?), LEAST(COALESCE(ws.end_at, ?), ?))) AS on_duty_seconds
-  FROM work_sessions ws
-  WHERE ws.start_at < ?
-    AND COALESCE(ws.end_at, ?) > ?
-  GROUP BY ws.employee_id
-) on_duty ON on_duty.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         MIN(ws.start_at) AS first_start_at
-  FROM work_sessions ws
-  WHERE ws.start_at >= ?
-    AND ws.start_at < ?
-  GROUP BY ws.employee_id
-) ws_start ON ws_start.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         MAX(ws.end_at) AS last_end_at
-  FROM work_sessions ws
-  WHERE ws.end_at IS NOT NULL
-    AND ws.end_at >= ?
-    AND ws.end_at < ?
-  GROUP BY ws.employee_id
-) ws_end ON ws_end.employee_id = ds.employee_id
 WHERE ds.stat_date = ?
   AND (? = 0 OR e.department_id = ?)
 ORDER BY ds.attendance_seconds DESC
 `
 
 type ListDailyStatsForExportByDateParams struct {
-	GREATEST     interface{}   `json:"GREATEST"`
-	LEAST        interface{}   `json:"LEAST"`
-	StartAt      time.Time     `json:"start_at"`
-	EndAt        time.Time     `json:"end_at"`
-	GREATEST_2   interface{}   `json:"GREATEST_2"`
-	Column6      interface{}   `json:"column_6"`
-	LEAST_2      interface{}   `json:"LEAST_2"`
-	StartAt_2    time.Time     `json:"start_at_2"`
-	EndAt_2      sql.NullTime  `json:"end_at_2"`
-	EndAt_3      sql.NullTime  `json:"end_at_3"`
-	StartAt_3    time.Time     `json:"start_at_3"`
-	StartAt_4    time.Time     `json:"start_at_4"`
-	EndAt_4      sql.NullTime  `json:"end_at_4"`
-	EndAt_5      sql.NullTime  `json:"end_at_5"`
-	StatDate     time.Time     `json:"stat_date"`
-	Column16     interface{}   `json:"column_16"`
-	DepartmentID sql.NullInt64 `json:"department_id"`
+	DayStart           time.Time     `json:"day_start"`
+	ReportEnd          time.Time     `json:"report_end"`
+	DayEnd             time.Time     `json:"day_end"`
+	StatDate           time.Time     `json:"stat_date"`
+	DepartmentIDFilter int64         `json:"department_id_filter"`
+	DepartmentID       sql.NullInt64 `json:"department_id"`
 }
 
 type ListDailyStatsForExportByDateRow struct {
@@ -276,22 +315,21 @@ type ListDailyStatsForExportByDateRow struct {
 
 func (q *Queries) ListDailyStatsForExportByDate(ctx context.Context, arg ListDailyStatsForExportByDateParams) ([]ListDailyStatsForExportByDateRow, error) {
 	rows, err := q.db.QueryContext(ctx, listDailyStatsForExportByDate,
-		arg.GREATEST,
-		arg.LEAST,
-		arg.StartAt,
-		arg.EndAt,
-		arg.GREATEST_2,
-		arg.Column6,
-		arg.LEAST_2,
-		arg.StartAt_2,
-		arg.EndAt_2,
-		arg.EndAt_3,
-		arg.StartAt_3,
-		arg.StartAt_4,
-		arg.EndAt_4,
-		arg.EndAt_5,
+		arg.DayStart,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.DayStart,
+		arg.DayStart,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.ReportEnd,
+		arg.DayStart,
+		arg.DayStart,
+		arg.DayEnd,
+		arg.DayStart,
+		arg.DayEnd,
 		arg.StatDate,
-		arg.Column16,
+		arg.DepartmentIDFilter,
 		arg.DepartmentID,
 	)
 	if err != nil {

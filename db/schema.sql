@@ -211,7 +211,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   target_type VARCHAR(64) NOT NULL,
   target_id BIGINT NULL,
   detail JSON NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_logs_created_at (created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS work_sessions (

@@ -219,6 +219,10 @@ func (h *Handler) ClientErrors(w http.ResponseWriter, r *http.Request) {
         }
         items = append(items, item)
     }
+    if err := scanner.Err(); err != nil {
+        writeError(w, http.StatusInternalServerError, "读取客户端错误日志失败")
+        return
+    }
 
     sort.Slice(items, func(i, j int) bool {
         return items[i].ReceivedAt > items[j].ReceivedAt

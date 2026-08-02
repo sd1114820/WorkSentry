@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -73,46 +75,69 @@ func (h *Handler) ReportDaily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	queryStartedAt := time.Now()
-	queryCtx, cancelQuery, queryTimeout := h.reportQueryContext(r.Context())
-	rows, err := h.Queries.ListDailyStatsByDate(queryCtx, buildDailyStatsByDateParams(date, departmentID))
-	cancelQuery()
-	if err != nil {
-		h.writeReportQueryError(w, "日统计汇总", fmt.Sprintf("日期=%s 部门编号=%d", dateValue, departmentID), err, queryStartedAt, queryTimeout)
+	queryParameters := fmt.Sprintf("日期=%s 部门编号=%d", dateValue, departmentID)
+	jobKey := fmt.Sprintf("daily:%s:%d", date.Format("2006-01-02"), departmentID)
+	job := h.reportJobs.getOrStart(jobKey, func() reportJobLoadResult {
+		return newReportJobLoadResult(h, func(queryContext context.Context) (any, error) {
+			queryStartedAt := time.Now()
+			rows, queryErr := h.Queries.ListDailyStatsByDate(queryContext, buildDailyStatsByDateParams(date, departmentID))
+			if queryErr != nil {
+				return nil, queryErr
+			}
+			logReportQuerySuccess("日统计汇总", queryParameters, len(rows), queryStartedAt)
+
+			items := make([]DailyReportView, 0, len(rows))
+			for _, row := range rows {
+				metrics := buildDailyReportMetrics(
+					int64(row.NormalSeconds),
+					int64(row.FishSeconds),
+					int64(row.IdleSeconds),
+					int64(row.OfflineSeconds),
+					int64(row.EffectiveSeconds),
+					row.BreakSeconds,
+					row.OnDutySeconds,
+				)
+				items = append(items, DailyReportView{
+					EmployeeCode:       row.EmployeeCode,
+					Name:               row.Name,
+					Department:         nullString(row.DepartmentName),
+					OnDutyDuration:     formatDuration(metrics.OnDutySeconds),
+					WorkDuration:       formatDuration(metrics.WorkSeconds),
+					NormalDuration:     formatDuration(int64(row.NormalSeconds)),
+					FishDuration:       formatDuration(int64(row.FishSeconds)),
+					IdleDuration:       formatDuration(metrics.IdleSeconds),
+					OfflineDuration:    formatDuration(int64(row.OfflineSeconds)),
+					AttendanceDuration: formatDuration(int64(row.AttendanceSeconds)),
+					EffectiveDuration:  formatDuration(int64(row.EffectiveSeconds)),
+				})
+			}
+
+			return DailyReportResponse{
+				Date:  date.Format("2006-01-02"),
+				Items: items,
+			}, nil
+		})
+	})
+	jobResult, ready := waitReportJob(r, job)
+	if !ready {
+		if r.Context().Err() == nil {
+			writeReportPending(w, "日统计汇总", job.createdAt)
+		}
 		return
 	}
-	logReportQuerySuccess("日统计汇总", fmt.Sprintf("日期=%s 部门编号=%d", dateValue, departmentID), len(rows), queryStartedAt)
-
-	items := make([]DailyReportView, 0, len(rows))
-	for _, row := range rows {
-		metrics := buildDailyReportMetrics(
-			int64(row.NormalSeconds),
-			int64(row.FishSeconds),
-			int64(row.IdleSeconds),
-			int64(row.OfflineSeconds),
-			int64(row.EffectiveSeconds),
-			row.BreakSeconds,
-			row.OnDutySeconds,
-		)
-		items = append(items, DailyReportView{
-			EmployeeCode:       row.EmployeeCode,
-			Name:               row.Name,
-			Department:         nullString(row.DepartmentName),
-			OnDutyDuration:     formatDuration(metrics.OnDutySeconds),
-			WorkDuration:       formatDuration(metrics.WorkSeconds),
-			NormalDuration:     formatDuration(int64(row.NormalSeconds)),
-			FishDuration:       formatDuration(int64(row.FishSeconds)),
-			IdleDuration:       formatDuration(metrics.IdleSeconds),
-			OfflineDuration:    formatDuration(int64(row.OfflineSeconds)),
-			AttendanceDuration: formatDuration(int64(row.AttendanceSeconds)),
-			EffectiveDuration:  formatDuration(int64(row.EffectiveSeconds)),
-		})
+	if jobResult.err != nil {
+		if errors.Is(jobResult.err, context.Canceled) && r.Context().Err() != nil {
+			return
+		}
+		h.writeReportQueryError(w, "日统计汇总", queryParameters, jobResult.err, jobResult.startedAt, jobResult.timeout)
+		return
 	}
-
-	writeJSON(w, http.StatusOK, DailyReportResponse{
-		Date:  date.Format("2006-01-02"),
-		Items: items,
-	})
+	response, ok := jobResult.value.(DailyReportResponse)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "日统计汇总结果格式错误")
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) ReportTimeline(w http.ResponseWriter, r *http.Request) {
@@ -215,60 +240,83 @@ func (h *Handler) ReportRank(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "日期格式错误")
 		return
 	}
-	queryStartedAt := time.Now()
-	queryCtx, cancelQuery, queryTimeout := h.reportQueryContext(r.Context())
-	rows, err := h.Queries.ListDailyStatsByDate(queryCtx, buildDailyStatsByDateParams(date, 0))
-	cancelQuery()
-	if err != nil {
-		h.writeReportQueryError(w, "团队排行", fmt.Sprintf("日期=%s", dateValue), err, queryStartedAt, queryTimeout)
+	queryParameters := fmt.Sprintf("日期=%s", dateValue)
+	jobKey := "rank:" + date.Format("2006-01-02")
+	job := h.reportJobs.getOrStart(jobKey, func() reportJobLoadResult {
+		return newReportJobLoadResult(h, func(queryContext context.Context) (any, error) {
+			queryStartedAt := time.Now()
+			rows, queryErr := h.Queries.ListDailyStatsForRankByDate(queryContext, date)
+			if queryErr != nil {
+				return nil, queryErr
+			}
+			logReportQuerySuccess("团队排行", queryParameters, len(rows), queryStartedAt)
+
+			workList := make([]rankValue, 0, len(rows))
+			fishList := make([]rankValue, 0, len(rows))
+			for _, row := range rows {
+				workList = append(workList, rankValue{
+					Item: RankItem{
+						EmployeeCode: row.EmployeeCode,
+						Name:         row.Name,
+						Department:   nullString(row.DepartmentName),
+						Value:        formatDuration(int64(row.EffectiveSeconds)),
+					},
+					Score: float64(row.EffectiveSeconds),
+				})
+				fishRatio := 0.0
+				if row.AttendanceSeconds > 0 {
+					fishRatio = float64(row.FishSeconds) / float64(row.AttendanceSeconds)
+				}
+				fishList = append(fishList, rankValue{
+					Item: RankItem{
+						EmployeeCode: row.EmployeeCode,
+						Name:         row.Name,
+						Department:   nullString(row.DepartmentName),
+						Value:        formatPercent(fishRatio),
+					},
+					Score: fishRatio,
+				})
+			}
+
+			sort.Slice(workList, func(i, j int) bool { return workList[i].Score > workList[j].Score })
+			sort.Slice(fishList, func(i, j int) bool { return fishList[i].Score > fishList[j].Score })
+
+			workTop := make([]RankItem, 0, minInt(len(workList), 10))
+			for i := 0; i < len(workList) && i < 10; i++ {
+				workTop = append(workTop, workList[i].Item)
+			}
+			fishTop := make([]RankItem, 0, minInt(len(fishList), 10))
+			for i := 0; i < len(fishList) && i < 10; i++ {
+				fishTop = append(fishTop, fishList[i].Item)
+			}
+
+			return RankResponse{
+				Date:    dateValue,
+				WorkTop: workTop,
+				FishTop: fishTop,
+			}, nil
+		})
+	})
+	jobResult, ready := waitReportJob(r, job)
+	if !ready {
+		if r.Context().Err() == nil {
+			writeReportPending(w, "团队排行", job.createdAt)
+		}
 		return
 	}
-	logReportQuerySuccess("团队排行", fmt.Sprintf("日期=%s", dateValue), len(rows), queryStartedAt)
-
-	workList := make([]rankValue, 0, len(rows))
-	fishList := make([]rankValue, 0, len(rows))
-	for _, row := range rows {
-		workList = append(workList, rankValue{
-			Item: RankItem{
-				EmployeeCode: row.EmployeeCode,
-				Name:         row.Name,
-				Department:   nullString(row.DepartmentName),
-				Value:        formatDuration(int64(row.EffectiveSeconds)),
-			},
-			Score: float64(row.EffectiveSeconds),
-		})
-		fishRatio := 0.0
-		if row.AttendanceSeconds > 0 {
-			fishRatio = float64(row.FishSeconds) / float64(row.AttendanceSeconds)
+	if jobResult.err != nil {
+		if errors.Is(jobResult.err, context.Canceled) && r.Context().Err() != nil {
+			return
 		}
-		fishList = append(fishList, rankValue{
-			Item: RankItem{
-				EmployeeCode: row.EmployeeCode,
-				Name:         row.Name,
-				Department:   nullString(row.DepartmentName),
-				Value:        formatPercent(fishRatio),
-			},
-			Score: fishRatio,
-		})
+		h.writeReportQueryError(w, "团队排行", queryParameters, jobResult.err, jobResult.startedAt, jobResult.timeout)
+		return
 	}
-
-	sort.Slice(workList, func(i, j int) bool { return workList[i].Score > workList[j].Score })
-	sort.Slice(fishList, func(i, j int) bool { return fishList[i].Score > fishList[j].Score })
-
-	workTop := make([]RankItem, 0, minInt(len(workList), 10))
-	for i := 0; i < len(workList) && i < 10; i++ {
-		workTop = append(workTop, workList[i].Item)
+	response, ok := jobResult.value.(RankResponse)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "团队排行结果格式错误")
+		return
 	}
-	fishTop := make([]RankItem, 0, minInt(len(fishList), 10))
-	for i := 0; i < len(fishList) && i < 10; i++ {
-		fishTop = append(fishTop, fishList[i].Item)
-	}
-
-	writeJSON(w, http.StatusOK, RankResponse{
-		Date:    dateValue,
-		WorkTop: workTop,
-		FishTop: fishTop,
-	})
+	writeJSON(w, http.StatusOK, response)
 }
 
 func sourceLabel(value string) string {

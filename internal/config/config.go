@@ -69,7 +69,7 @@ func Load(path string) (*Config, error) {
 		cfg.Database.RawEventsRetentionDays = 3
 	}
 	if cfg.Server.ReportQueryTimeoutSeconds <= 0 {
-		cfg.Server.ReportQueryTimeoutSeconds = 5
+		cfg.Server.ReportQueryTimeoutSeconds = 120
 	}
 
 	return &cfg, nil
@@ -82,7 +82,7 @@ func defaultConfig() Config {
 			ReadTimeoutSeconds:        15,
 			WriteTimeoutSeconds:       15,
 			IdleTimeoutSeconds:        60,
-			ReportQueryTimeoutSeconds: 5,
+			ReportQueryTimeoutSeconds: 120,
 		},
 		Database: DatabaseConfig{
 			RawEventsRetentionDays: 3,

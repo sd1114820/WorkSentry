@@ -25,6 +25,7 @@ var migrations = []Migration{
 	{Version: 7, Name: "ingest_outbox", Run: migrate007IngestOutbox},
 	{Version: 8, Name: "history_cleanup_indexes", Run: migrate008HistoryCleanupCompatibility},
 	{Version: 9, Name: "history_cleanup_settings", Run: migrate009HistoryCleanupSettings},
+	{Version: 10, Name: "audit_log_query_index", Run: migrate010AuditLogQueryIndex},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -215,6 +216,8 @@ func isMigrationAlreadyPresent(ctx context.Context, db *sql.DB, version int64) (
 			}
 		}
 		return true, nil
+	case 10:
+		return indexExists(ctx, db, "audit_logs", "idx_audit_logs_created_at")
 	default:
 		return false, nil
 	}
@@ -379,7 +382,8 @@ func migrate001Init(ctx context.Context, db *sql.DB) error {
   target_type VARCHAR(64) NOT NULL,
   target_id BIGINT NULL,
   detail JSON NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_audit_logs_created_at (created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		builtinBlacklistInsertSQL,
 	)
@@ -501,6 +505,10 @@ func migrate005PerfIndexes(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	return nil
+}
+
+func migrate010AuditLogQueryIndex(ctx context.Context, db *sql.DB) error {
+	return ensureIndex(ctx, db, "audit_logs", "idx_audit_logs_created_at", `ALTER TABLE audit_logs ADD INDEX idx_audit_logs_created_at (created_at, id)`)
 }
 
 func migrate006StorageGrowthOptimization(ctx context.Context, db *sql.DB) error {

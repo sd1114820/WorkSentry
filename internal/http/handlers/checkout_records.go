@@ -130,7 +130,7 @@ func (h *Handler) CheckoutRecords(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	if err := h.DB.QueryRowContext(r.Context(), countSQL, args...).Scan(&total); err != nil {
-		writeError(w, http.StatusInternalServerError, "读取模板失败")
+		writeError(w, http.StatusInternalServerError, "读取下班记录失败")
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *Handler) CheckoutRecords(w http.ResponseWriter, r *http.Request) {
 	listArgs := append(append([]any{}, args...), pageSize, offset)
 	rows, err := h.DB.QueryContext(r.Context(), listSQL, listArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "读取模板失败")
+		writeError(w, http.StatusInternalServerError, "读取下班记录失败")
 		return
 	}
 	defer rows.Close()
@@ -165,7 +165,7 @@ func (h *Handler) CheckoutRecords(w http.ResponseWriter, r *http.Request) {
 			dataJSON     string
 		)
 		if err := rows.Scan(&id, &employeeCode, &name, &department, &startAt, &endAt, &templateName, &createdAt, &snapshotJSON, &dataJSON); err != nil {
-			writeError(w, http.StatusInternalServerError, "读取模板失败")
+			writeError(w, http.StatusInternalServerError, "读取下班记录失败")
 			return
 		}
 		summary := buildCheckoutSummary(snapshotJSON, dataJSON)
@@ -186,7 +186,7 @@ func (h *Handler) CheckoutRecords(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "读取模板失败")
+		writeError(w, http.StatusInternalServerError, "读取下班记录失败")
 		return
 	}
 
@@ -239,7 +239,7 @@ func (h *Handler) CheckoutRecordDetail(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "记录不存在")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "读取模板失败")
+		writeError(w, http.StatusInternalServerError, "读取下班记录详情失败")
 		return
 	}
 

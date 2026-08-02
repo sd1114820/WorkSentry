@@ -37,20 +37,59 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 }
 
 const listAuditLogs = `-- name: ListAuditLogs :many
-SELECT id, operator_id, action, target_type, target_id, detail, created_at
+SELECT id, operator_id, action, target_type, target_id, COALESCE(detail, JSON_OBJECT()) AS detail, created_at
 FROM audit_logs
-WHERE ( ? = '' OR DATE(created_at) = ? )
-ORDER BY created_at DESC
+ORDER BY id DESC
 LIMIT 200
 `
 
-type ListAuditLogsParams struct {
-	Column1   interface{} `json:"column_1"`
-	CreatedAt time.Time   `json:"created_at"`
+func (q *Queries) ListAuditLogs(ctx context.Context) ([]AuditLog, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditLogs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperatorID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Detail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
-	rows, err := q.db.QueryContext(ctx, listAuditLogs, arg.Column1, arg.CreatedAt)
+const listAuditLogsByRange = `-- name: ListAuditLogsByRange :many
+SELECT id, operator_id, action, target_type, target_id, COALESCE(detail, JSON_OBJECT()) AS detail, created_at
+FROM audit_logs
+WHERE created_at >= ?
+  AND created_at < ?
+ORDER BY created_at DESC, id DESC
+LIMIT 200
+`
+
+type ListAuditLogsByRangeParams struct {
+	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt_2 time.Time `json:"created_at_2"`
+}
+
+func (q *Queries) ListAuditLogsByRange(ctx context.Context, arg ListAuditLogsByRangeParams) ([]AuditLog, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditLogsByRange, arg.CreatedAt, arg.CreatedAt_2)
 	if err != nil {
 		return nil, err
 	}

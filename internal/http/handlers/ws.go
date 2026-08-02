@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -9,7 +11,25 @@ import (
 
 func (h *Handler) LiveWS(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.authenticateAdmin(r); err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+		var authErr *adminAuthenticationError
+		if errors.As(err, &authErr) {
+			if authErr.status >= http.StatusInternalServerError {
+				errorID := newErrorReference()
+				log.Printf("实时连接会话校验失败: 错误编号=%s 错误=%v", errorID, authErr.cause)
+				w.Header().Set("X-Error-ID", errorID)
+				writeErrorWithCodeData(w, authErr.status, authErr.code, authErr.message+"（错误编号："+errorID+"）", map[string]string{"errorId": errorID})
+				return
+			}
+			writeErrorWithCode(w, authErr.status, authErr.code, authErr.message)
+			return
+		}
+		writeErrorWithCode(w, http.StatusUnauthorized, "admin_session_invalid", "会话已失效")
+		return
+	}
+	startedAt := time.Now()
+	items, err := h.buildLiveSnapshot(r)
+	if err != nil {
+		writeDataQueryError(w, "实时状态", "date="+startedAt.Format("2006-01-02"), err, startedAt)
 		return
 	}
 
@@ -22,7 +42,6 @@ func (h *Handler) LiveWS(w http.ResponseWriter, r *http.Request) {
 	h.Hub.Add(conn)
 	defer h.Hub.Remove(conn)
 
-	items := h.buildLiveSnapshot(r)
 	h.Hub.Send(conn, LiveMessage{
 		Type:  "snapshot",
 		Items: items,

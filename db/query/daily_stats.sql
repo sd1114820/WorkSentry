@@ -37,7 +37,7 @@ SELECT ds.stat_date,
            GREATEST(ts.start_at, sqlc.arg(day_start)),
            LEAST(ts.end_at, sqlc.arg(report_end))
          ))
-         FROM time_segments ts
+         FROM time_segments ts FORCE INDEX (idx_time_segments_employee_end)
          WHERE ts.employee_id = ds.employee_id
            AND ts.status = 'break'
            AND ts.start_at < sqlc.arg(report_end)
@@ -49,10 +49,10 @@ SELECT ds.stat_date,
            GREATEST(ws.start_at, sqlc.arg(day_start)),
            LEAST(COALESCE(ws.end_at, sqlc.arg(report_end)), sqlc.arg(report_end))
          ))
-         FROM work_sessions ws
+         FROM work_sessions ws FORCE INDEX (idx_work_sessions_employee_end)
          WHERE ws.employee_id = ds.employee_id
            AND ws.start_at < sqlc.arg(report_end)
-           AND COALESCE(ws.end_at, sqlc.arg(report_end)) > sqlc.arg(day_start)
+           AND (ws.end_at IS NULL OR ws.end_at > sqlc.arg(day_start))
        ), 0) AS SIGNED) AS on_duty_seconds
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
@@ -60,6 +60,18 @@ LEFT JOIN departments d ON e.department_id = d.id
 WHERE ds.stat_date = sqlc.arg(stat_date)
   AND (sqlc.arg(department_id_filter) = 0 OR e.department_id = sqlc.narg(department_id))
 ORDER BY ds.attendance_seconds DESC;
+
+-- name: ListDailyStatsForRankByDate :many
+SELECT e.employee_code,
+       e.name,
+       d.name AS department_name,
+       ds.fish_seconds,
+       ds.attendance_seconds,
+       ds.effective_seconds
+FROM daily_stats ds
+JOIN employees e ON ds.employee_id = e.id
+LEFT JOIN departments d ON e.department_id = d.id
+WHERE ds.stat_date = ?;
 
 -- name: ListDailyStatsForExportByDate :many
 SELECT ds.stat_date,
@@ -73,47 +85,46 @@ SELECT ds.stat_date,
        ds.offline_seconds,
        ds.attendance_seconds,
        ds.effective_seconds,
-       CAST(COALESCE(breaks.break_seconds, 0) AS SIGNED) AS break_seconds,
-       CAST(COALESCE(on_duty.on_duty_seconds, 0) AS SIGNED) AS on_duty_seconds,
-       ws_start.first_start_at,
-       ws_end.last_end_at
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ts.start_at, sqlc.arg(day_start)),
+           LEAST(ts.end_at, sqlc.arg(report_end))
+         ))
+         FROM time_segments ts FORCE INDEX (idx_time_segments_employee_end)
+         WHERE ts.employee_id = ds.employee_id
+           AND ts.status = 'break'
+           AND ts.start_at < sqlc.arg(report_end)
+           AND ts.end_at > sqlc.arg(day_start)
+       ), 0) AS SIGNED) AS break_seconds,
+       CAST(COALESCE((
+         SELECT SUM(TIMESTAMPDIFF(
+           SECOND,
+           GREATEST(ws.start_at, sqlc.arg(day_start)),
+           LEAST(COALESCE(ws.end_at, sqlc.arg(report_end)), sqlc.arg(report_end))
+         ))
+         FROM work_sessions ws FORCE INDEX (idx_work_sessions_employee_end)
+         WHERE ws.employee_id = ds.employee_id
+           AND ws.start_at < sqlc.arg(report_end)
+           AND (ws.end_at IS NULL OR ws.end_at > sqlc.arg(day_start))
+       ), 0) AS SIGNED) AS on_duty_seconds,
+       (
+         SELECT MIN(ws_start.start_at)
+         FROM work_sessions ws_start FORCE INDEX (idx_work_sessions_employee_start)
+         WHERE ws_start.employee_id = ds.employee_id
+           AND ws_start.start_at >= sqlc.arg(day_start)
+           AND ws_start.start_at < sqlc.arg(day_end)
+       ) AS first_start_at,
+       (
+         SELECT MAX(ws_end.end_at)
+         FROM work_sessions ws_end FORCE INDEX (idx_work_sessions_employee_end)
+         WHERE ws_end.employee_id = ds.employee_id
+           AND ws_end.end_at >= sqlc.arg(day_start)
+           AND ws_end.end_at < sqlc.arg(day_end)
+       ) AS last_end_at
 FROM daily_stats ds
 JOIN employees e ON ds.employee_id = e.id
 LEFT JOIN departments d ON e.department_id = d.id
-LEFT JOIN (
-  SELECT ts.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ts.start_at, ?), LEAST(ts.end_at, ?))) AS break_seconds
-  FROM time_segments ts
-  WHERE ts.status = 'break'
-    AND ts.start_at < ?
-    AND ts.end_at > ?
-  GROUP BY ts.employee_id
-) breaks ON breaks.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         SUM(TIMESTAMPDIFF(SECOND, GREATEST(ws.start_at, ?), LEAST(COALESCE(ws.end_at, ?), ?))) AS on_duty_seconds
-  FROM work_sessions ws
-  WHERE ws.start_at < ?
-    AND COALESCE(ws.end_at, ?) > ?
-  GROUP BY ws.employee_id
-) on_duty ON on_duty.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         MIN(ws.start_at) AS first_start_at
-  FROM work_sessions ws
-  WHERE ws.start_at >= ?
-    AND ws.start_at < ?
-  GROUP BY ws.employee_id
-) ws_start ON ws_start.employee_id = ds.employee_id
-LEFT JOIN (
-  SELECT ws.employee_id,
-         MAX(ws.end_at) AS last_end_at
-  FROM work_sessions ws
-  WHERE ws.end_at IS NOT NULL
-    AND ws.end_at >= ?
-    AND ws.end_at < ?
-  GROUP BY ws.employee_id
-) ws_end ON ws_end.employee_id = ds.employee_id
-WHERE ds.stat_date = ?
-  AND (? = 0 OR e.department_id = ?)
+WHERE ds.stat_date = sqlc.arg(stat_date)
+  AND (sqlc.arg(department_id_filter) = 0 OR e.department_id = sqlc.narg(department_id))
 ORDER BY ds.attendance_seconds DESC;

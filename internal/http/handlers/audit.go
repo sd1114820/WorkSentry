@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"worksentry/internal/db/sqlc"
@@ -22,22 +24,25 @@ func (h *Handler) AuditLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "不支持的请求方式")
 		return
 	}
-	date := r.URL.Query().Get("date")
-	params := sqlc.ListAuditLogsParams{
-		Column1:   date,
-		CreatedAt: time.Time{},
-	}
+	date := strings.TrimSpace(r.URL.Query().Get("date"))
+	startedAt := time.Now()
+	var items []sqlc.AuditLog
+	var err error
 	if date != "" {
-		parsed, err := parseDate(date)
-		if err != nil {
+		parsed, parseErr := parseDate(date)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "日期格式错误")
 			return
 		}
-		params.CreatedAt = parsed
+		items, err = h.Queries.ListAuditLogsByRange(r.Context(), sqlc.ListAuditLogsByRangeParams{
+			CreatedAt:   parsed,
+			CreatedAt_2: parsed.Add(24 * time.Hour),
+		})
+	} else {
+		items, err = h.Queries.ListAuditLogs(r.Context())
 	}
-	items, err := h.Queries.ListAuditLogs(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "读取审计失败")
+		writeDataQueryError(w, "审计日志", "date="+date, err, startedAt)
 		return
 	}
 
@@ -70,7 +75,7 @@ func (h *Handler) AuditLogs(w http.ResponseWriter, r *http.Request) {
 
 func auditTarget(item sqlc.AuditLog) string {
 	if item.TargetID.Valid {
-		return item.TargetType
+		return fmt.Sprintf("%s #%d", item.TargetType, item.TargetID.Int64)
 	}
 	return item.TargetType
 }

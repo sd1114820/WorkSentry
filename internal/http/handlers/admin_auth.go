@@ -80,10 +80,13 @@ func (h *Handler) authenticateAdmin(r *http.Request) (sqlc.AdminSession, error) 
 		return sqlc.AdminSession{}, newAdminAuthenticationError(http.StatusUnauthorized, "admin_session_expired", "会话已过期", nil)
 	}
 
-	_ = h.Queries.UpdateAdminSessionLastSeen(authContext, sqlc.UpdateAdminSessionLastSeenParams{
-		LastSeen: sql.NullTime{Time: time.Now(), Valid: true},
-		Token:    token,
-	})
+	now := time.Now()
+	if !session.LastSeen.Valid || now.Sub(session.LastSeen.Time) >= time.Minute {
+		_ = h.Queries.UpdateAdminSessionLastSeen(authContext, sqlc.UpdateAdminSessionLastSeenParams{
+			LastSeen: sql.NullTime{Time: now, Valid: true},
+			Token:    token,
+		})
+	}
 	return session, nil
 }
 

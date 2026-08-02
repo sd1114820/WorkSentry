@@ -113,18 +113,22 @@ SELECT ts.employee_id,
        d.name AS department_name,
        ts.start_at,
        ts.end_at
-FROM time_segments ts
-JOIN employees e ON ts.employee_id = e.id
+FROM employees e
+STRAIGHT_JOIN time_segments ts
+  ON ts.employee_id = e.id
+ AND ts.status = 'offline'
+ AND ts.start_at < ?
+ AND ts.end_at > ?
 LEFT JOIN departments d ON e.department_id = d.id
-WHERE ts.status = 'offline'
-  AND ts.start_at < ?
-  AND ts.end_at > ?
-ORDER BY ts.start_at
+WHERE (? = '' OR e.employee_code = ?)
+ORDER BY e.employee_code, ts.start_at
 `
 
 type ListOfflineSegmentsByDateParams struct {
-	StartAt time.Time `json:"start_at"`
-	EndAt   time.Time `json:"end_at"`
+	RangeEnd           time.Time `json:"range_end"`
+	RangeStart         time.Time `json:"range_start"`
+	EmployeeCodeFilter string    `json:"employee_code_filter"`
+	EmployeeCode       string    `json:"employee_code"`
 }
 
 type ListOfflineSegmentsByDateRow struct {
@@ -137,7 +141,12 @@ type ListOfflineSegmentsByDateRow struct {
 }
 
 func (q *Queries) ListOfflineSegmentsByDate(ctx context.Context, arg ListOfflineSegmentsByDateParams) ([]ListOfflineSegmentsByDateRow, error) {
-	rows, err := q.db.QueryContext(ctx, listOfflineSegmentsByDate, arg.StartAt, arg.EndAt)
+	rows, err := q.db.QueryContext(ctx, listOfflineSegmentsByDate,
+		arg.RangeEnd,
+		arg.RangeStart,
+		arg.EmployeeCodeFilter,
+		arg.EmployeeCode,
+	)
 	if err != nil {
 		return nil, err
 	}

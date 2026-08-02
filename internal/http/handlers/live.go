@@ -22,11 +22,16 @@ type LiveView struct {
 }
 
 func (h *Handler) LiveSnapshot(w http.ResponseWriter, r *http.Request) {
-	items := h.buildLiveSnapshot(r)
+	startedAt := time.Now()
+	items, err := h.buildLiveSnapshot(r)
+	if err != nil {
+		writeDataQueryError(w, "实时状态", "date="+startedAt.Format("2006-01-02"), err, startedAt)
+		return
+	}
 	writeJSON(w, http.StatusOK, items)
 }
 
-func (h *Handler) buildLiveSnapshot(r *http.Request) []LiveView {
+func (h *Handler) buildLiveSnapshot(r *http.Request) ([]LiveView, error) {
 	now := time.Now()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	dayEnd := dayStart.Add(24 * time.Hour)
@@ -38,7 +43,7 @@ func (h *Handler) buildLiveSnapshot(r *http.Request) []LiveView {
 		EndAt_2:   sql.NullTime{Time: dayEnd, Valid: true},
 	})
 	if err != nil {
-		return []LiveView{}
+		return nil, err
 	}
 
 	settings := h.getSettingsOrDefault(r)
@@ -80,5 +85,5 @@ func (h *Handler) buildLiveSnapshot(r *http.Request) []LiveView {
 			HasTodayPunch: row.HasTodayPunch > 0,
 		})
 	}
-	return items
+	return items, nil
 }

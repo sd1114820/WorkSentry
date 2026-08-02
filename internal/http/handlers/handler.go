@@ -38,7 +38,11 @@ type Handler struct {
 	historyCleanupMu     sync.RWMutex
 	historyCleanupState  HistoryCleanupStatus
 	historyCleanupCancel context.CancelFunc
+
+	reportJobs reportJobStore
 }
+
+const serverVersion = "20260802-export-download-v6"
 
 func NewHandler(cfg *config.Config, db sqlc.DBTX) *Handler {
 	return NewHandlerWithProducer(cfg, db, mq.NewProducer(cfg.MQ))
@@ -64,6 +68,7 @@ func NewHandlerWithProducer(cfg *config.Config, db sqlc.DBTX, producer mq.Produc
 func (h *Handler) WithLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		w.Header().Set("X-WorkSentry-Version", serverVersion)
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
 	})
@@ -227,11 +232,14 @@ func (h *Handler) logAudit(r *http.Request, action string, targetType string, ta
 
 	operatorID := adminIDFromRequest(r)
 
-	_ = h.Queries.CreateAuditLog(r.Context(), sqlc.CreateAuditLogParams{
+	if err := h.Queries.CreateAuditLog(r.Context(), sqlc.CreateAuditLogParams{
 		OperatorID: operatorID,
 		Action:     action,
 		TargetType: targetType,
 		TargetID:   targetID,
 		Detail:     payload,
-	})
+	}); err != nil {
+		errorID := newErrorReference()
+		log.Printf("写入审计日志失败: 错误编号=%s 操作=%s 目标类型=%s 目标编号=%v 错误=%v", errorID, action, targetType, targetID, err)
+	}
 }

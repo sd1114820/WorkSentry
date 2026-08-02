@@ -25,3 +25,18 @@ func TestHistoryCleanupCompatibilityMigrationVersionIsPreserved(t *testing.T) {
 		t.Fatal("缺少第八版兼容迁移")
 	}
 }
+
+func TestAuditLogQueryIndexMigrationIsRegistered(t *testing.T) {
+	found := false
+	for _, migration := range migrations {
+		if migration.Version == 10 {
+			found = true
+			if migration.Name != "audit_log_query_index" {
+				t.Fatalf("第十版迁移名称错误: %q", migration.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("缺少审计日志索引升级迁移")
+	}
+}

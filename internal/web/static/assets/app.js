@@ -34,6 +34,8 @@ let liveItems = [];
 let liveMap = {};
 let liveTimer = null;
 let wsClient = null;
+let wsReconnectTimer = null;
+let wsReconnectAttempts = 0;
 let liveDomMap = {};
 let liveRenderQueued = false;
 let liveSearchTimer = null;
@@ -161,7 +163,7 @@ async function responseErrorMessage(resp) {
     return '请求失败（状态码：' + resp.status + '，错误编号：' + errorId + '）';
   }
   if (resp.status === 504) {
-    return '请求超时（状态码：504）：服务或数据库未在网关时限内返回';
+    return '上游网关超时（状态码：504）：网关未返回服务端错误内容';
   }
   if (resp.status === 502) {
     return '网关无法连接服务（状态码：502）：请检查服务进程和监听端口';
@@ -196,18 +198,64 @@ async function fetchJSON(url, options) {
   }
 }
 
-async function fetchBlob(url, options) {
-  const resp = await requestWithClearError(url, options);
-  if (resp.status === 401) {
-    if (await responseInvalidatesAdminSession(resp)) {
-      setAuth('', '');
+function waitMilliseconds(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchReportJSON(url, onPending) {
+  while (true) {
+    const data = await fetchJSON(url);
+    if (!data || data.code !== 'report_pending') {
+      return data;
     }
-    throw new Error(await responseErrorMessage(resp));
+    if (onPending) {
+      onPending(data.message || '正在生成报表...');
+    }
+    const retryAfterMs = data.data && Number(data.data.retryAfterMs);
+    await waitMilliseconds(retryAfterMs > 0 ? retryAfterMs : 500);
   }
-  if (!resp.ok) {
-    throw new Error(await responseErrorMessage(resp));
+}
+
+async function fetchBlob(url, options, onPending) {
+  while (true) {
+    const resp = await requestWithClearError(url, options);
+    if (resp.status === 401) {
+      if (await responseInvalidatesAdminSession(resp)) {
+        setAuth('', '');
+      }
+      throw new Error(await responseErrorMessage(resp));
+    }
+    if (resp.status === 202 || resp.status === 425) {
+      let data;
+      try {
+        data = await resp.json();
+      } catch (error) {
+        throw new Error('导出任务响应格式错误（状态码：' + resp.status + '）');
+      }
+      if (!data || data.code !== 'report_pending') {
+        throw new Error((data && data.message) || '导出任务状态异常');
+      }
+      if (onPending) {
+        onPending(data.message || '正在生成导出文件...');
+      }
+      const retryAfterMs = data.data && Number(data.data.retryAfterMs);
+      await waitMilliseconds(retryAfterMs > 0 ? retryAfterMs : 500);
+      continue;
+    }
+    if (!resp.ok) {
+      throw new Error(await responseErrorMessage(resp));
+    }
+    return resp.blob();
   }
-  return resp.blob();
+}
+
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function setStatus(message, element) {
@@ -238,7 +286,11 @@ function formatLocalDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 10);
+  return formatDateInputValue(date);
+}
+
+function formatDateInputValue(date) {
+  return date.getFullYear() + '-' + padNumber(date.getMonth() + 1) + '-' + padNumber(date.getDate());
 }
 
 function formatDateTimeLocal(value) {
@@ -260,7 +312,7 @@ function buildMetaText(lastSeen, remaining) {
 
 function setDefaultDates() {
   const today = new Date();
-  const dateValue = today.toISOString().slice(0, 10);
+  const dateValue = formatDateInputValue(today);
   ['reportDate', 'timelineDate', 'offlineDate', 'auditDate', 'checkoutQueryStart', 'checkoutQueryEnd', 'reviewStartDate', 'reviewEndDate'].forEach((id) => {
     const input = document.getElementById(id);
     if (input && !input.value) {
@@ -290,6 +342,11 @@ async function login() {
 }
 
 function logout() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  wsReconnectAttempts = 0;
   if (wsClient) {
     wsClient.close();
     wsClient = null;
@@ -1543,13 +1600,19 @@ function connectLiveWS() {
   const wsUrl = scheme + '://' + location.host + '/ws/v1/live?token=' + encodeURIComponent(authToken);
   wsClient = new WebSocket(wsUrl);
   wsClient.onopen = () => {
+    wsReconnectAttempts = 0;
     connectionStatus.textContent = '已连接';
   };
   wsClient.onclose = () => {
     connectionStatus.textContent = '连接中断';
     wsClient = null;
     if (authToken) {
-      setTimeout(connectLiveWS, 3000);
+      wsReconnectAttempts += 1;
+      const delay = Math.min(30000, 3000 * (2 ** Math.min(wsReconnectAttempts - 1, 4)));
+      wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        connectLiveWS();
+      }, delay);
     }
   };
   wsClient.onerror = () => {
@@ -1716,7 +1779,7 @@ function setReportButtonBusy(buttonId, busy, busyText) {
 
 function getReportDateValue() {
   const dateInput = document.getElementById('reportDate');
-  return dateInput && dateInput.value ? dateInput.value : new Date().toISOString().slice(0, 10);
+  return dateInput && dateInput.value ? dateInput.value : formatDateInputValue(new Date());
 }
 
 async function loadDailyReport() {
@@ -1730,7 +1793,9 @@ async function loadDailyReport() {
     if (deptId && Number(deptId) > 0) {
       url += '&departmentId=' + encodeURIComponent(deptId);
     }
-    const data = await fetchJSON(url);
+    const data = await fetchReportJSON(url, (message) => {
+      renderReportMessage('dailyReportTable', message);
+    });
     renderDailyReport(data.items || []);
   } catch (error) {
     renderReportMessage('dailyReportTable', error && error.message ? error.message : '请求失败');
@@ -1770,7 +1835,9 @@ async function exportDaily() {
     if (deptId && Number(deptId) > 0) {
       url += '&departmentId=' + encodeURIComponent(deptId);
     }
-    const blob = await fetchBlob(url);
+    const blob = await fetchBlob(url, undefined, (message) => {
+      setReportButtonBusy('exportDaily', true, message);
+    });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = '日报_' + date + '.xlsx';
@@ -1805,7 +1872,7 @@ async function loadTimeline() {
   const typed = document.getElementById('timelineEmployeeSearch').value;
   const code = resolveEmployeeCode(hidden, typed);
   const dateInput = document.getElementById('timelineDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
+  const date = dateInput.value || formatDateInputValue(new Date());
   if (!code) {
     updateTimelineHint('请选择员工');
     document.getElementById('timelineTable').innerHTML = '<div class="empty-hint">请选择员工</div>';
@@ -1959,7 +2026,10 @@ async function loadRank() {
   renderReportMessage('rankFishTable', '正在加载排行...');
   try {
     const date = getReportDateValue();
-    const data = await fetchJSON('/api/v1/admin/reports/rank?date=' + encodeURIComponent(date));
+    const data = await fetchReportJSON('/api/v1/admin/reports/rank?date=' + encodeURIComponent(date), (message) => {
+      renderReportMessage('rankWorkTable', message);
+      renderReportMessage('rankFishTable', message);
+    });
     renderRankTables(data);
   } catch (error) {
     const message = error && error.message ? error.message : '请求失败';
@@ -1996,7 +2066,7 @@ function renderRankTables(data) {
 }
 function getDateFromInput(value) {
   if (!value) {
-    return new Date().toISOString().slice(0, 10);
+    return formatDateInputValue(new Date());
   }
   return value.slice(0, 10);
 }
@@ -2186,7 +2256,7 @@ function renderIncidents(items) {
 
 async function loadOfflineSegments() {
   const dateInput = document.getElementById('offlineDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
+  const date = dateInput.value || formatDateInputValue(new Date());
   const hidden = document.getElementById('offlineEmployee').value;
   const typed = document.getElementById('offlineEmployeeSearch').value;
   const code = resolveEmployeeCode(hidden, typed);
@@ -2199,7 +2269,9 @@ async function loadOfflineSegments() {
     url += '&employeeCode=' + encodeURIComponent(code);
   }
   try {
-    const items = await fetchJSON(url);
+    const items = await fetchReportJSON(url, (message) => {
+      document.getElementById('offlineSegmentsTable').innerHTML = '<div class="empty-hint">' + escapeHTML(message) + '</div>';
+    });
     renderOfflineSegments(items || []);
   } catch (error) {
     document.getElementById('offlineSegmentsTable').innerHTML = '<div class="empty-hint">' + error.message + '</div>';
@@ -2241,16 +2313,20 @@ function mergeOfflineSegmentsForDisplay(items) {
 
 function renderOfflineSegments(items) {
   const container = document.getElementById('offlineSegmentsTable');
+  if (!Array.isArray(items) || items.length === 0) {
+    container.innerHTML = '<div class="empty-hint">当日暂无离线段</div>';
+    return;
+  }
   const headers = ['工号', '姓名', '部门', '开始', '结束', '时长'];
   const mergedItems = mergeOfflineSegmentsForDisplay(items);
   const rows = mergedItems.map((item) => [
     '<div class="table-row cols-6">',
-    '<div>' + item.employeeCode + '</div>',
-    '<div>' + item.name + '</div>',
-    '<div>' + (item.department || '-') + '</div>',
-    '<div>' + item.startAt + '</div>',
-    '<div>' + item.endAt + '</div>',
-    '<div>' + item.duration + '</div>',
+    '<div>' + escapeHTML(item.employeeCode) + '</div>',
+    '<div>' + escapeHTML(item.name) + '</div>',
+    '<div>' + escapeHTML(item.department || '-') + '</div>',
+    '<div>' + escapeHTML(item.startAt) + '</div>',
+    '<div>' + escapeHTML(item.endAt) + '</div>',
+    '<div>' + escapeHTML(item.duration) + '</div>',
     '</div>'
   ].join(''));
   renderTable(container, headers, rows, 'cols-6');
@@ -2258,7 +2334,7 @@ function renderOfflineSegments(items) {
 
 async function loadAuditLogs() {
   const dateInput = document.getElementById('auditDate');
-  const date = dateInput.value || new Date().toISOString().slice(0, 10);
+  const date = dateInput.value || formatDateInputValue(new Date());
   try {
     const items = await fetchJSON('/api/v1/admin/audit-logs?date=' + encodeURIComponent(date));
     renderAuditLogs(items || []);
@@ -2269,14 +2345,18 @@ async function loadAuditLogs() {
 
 function renderAuditLogs(items) {
   const container = document.getElementById('auditTable');
+  if (!Array.isArray(items) || items.length === 0) {
+    container.innerHTML = '<div class="empty-hint">当日暂无审计日志</div>';
+    return;
+  }
   const headers = ['操作', '目标', '操作人', '详情', '时间'];
   const rows = items.map((item) => [
     '<div class="table-row cols-5">',
-    '<div>' + item.action + '</div>',
-    '<div>' + item.target + '</div>',
-    '<div>' + item.operator + '</div>',
-    '<div>' + (item.detail || '-') + '</div>',
-    '<div>' + item.createdAt + '</div>',
+    '<div>' + escapeHTML(item.action) + '</div>',
+    '<div>' + escapeHTML(item.target) + '</div>',
+    '<div>' + escapeHTML(item.operator) + '</div>',
+    '<div>' + escapeHTML(item.detail || '-') + '</div>',
+    '<div>' + escapeHTML(item.createdAt) + '</div>',
     '</div>'
   ].join(''));
   renderTable(container, headers, rows, 'cols-5');
@@ -3546,13 +3626,13 @@ function applyCheckoutQuickRange(rangeKey) {
   } else if (rangeKey === 'month') {
     start = new Date(start.getFullYear(), start.getMonth(), 1);
   }
-  document.getElementById('checkoutQueryStart').value = start.toISOString().slice(0, 10);
-  document.getElementById('checkoutQueryEnd').value = end.toISOString().slice(0, 10);
+  document.getElementById('checkoutQueryStart').value = formatDateInputValue(start);
+  document.getElementById('checkoutQueryEnd').value = formatDateInputValue(end);
   loadCheckoutRecords(1);
 }
 
 function resetCheckoutQuery() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatDateInputValue(new Date());
   document.getElementById('checkoutQueryStart').value = today;
   document.getElementById('checkoutQueryEnd').value = today;
   document.getElementById('checkoutQueryDepartment').value = '0';
@@ -3562,8 +3642,8 @@ function resetCheckoutQuery() {
 }
 
 async function loadCheckoutRecords(page) {
-  const startDate = document.getElementById('checkoutQueryStart').value || new Date().toISOString().slice(0, 10);
-  const endDate = document.getElementById('checkoutQueryEnd').value || new Date().toISOString().slice(0, 10);
+  const startDate = document.getElementById('checkoutQueryStart').value || formatDateInputValue(new Date());
+  const endDate = document.getElementById('checkoutQueryEnd').value || formatDateInputValue(new Date());
   const deptId = Number(document.getElementById('checkoutQueryDepartment').value || 0);
   const templateId = Number(document.getElementById('checkoutQueryTemplate').value || 0);
   const keyword = getEmployeeKeyword(document.getElementById('checkoutEmployee').value, document.getElementById('checkoutEmployeeSearch').value);
@@ -3668,8 +3748,8 @@ function closeCheckoutDetail() {
   if (modal) modal.classList.remove('is-active');
 }
 async function loadReviewList(page) {
-  const startDate = document.getElementById('reviewStartDate').value || new Date().toISOString().slice(0, 10);
-  const endDate = document.getElementById('reviewEndDate').value || new Date().toISOString().slice(0, 10);
+  const startDate = document.getElementById('reviewStartDate').value || formatDateInputValue(new Date());
+  const endDate = document.getElementById('reviewEndDate').value || formatDateInputValue(new Date());
   const deptId = Number(document.getElementById('reviewDepartment').value || 0);
   const keyword = getEmployeeKeyword(document.getElementById('reviewEmployee').value, document.getElementById('reviewEmployeeSearch').value);
   const pageSize = 20;
@@ -3696,7 +3776,7 @@ async function loadReviewList(page) {
 }
 
 function resetReviewList() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = formatDateInputValue(new Date());
   document.getElementById('reviewStartDate').value = today;
   document.getElementById('reviewEndDate').value = today;
   document.getElementById('reviewDepartment').value = '0';

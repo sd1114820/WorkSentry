@@ -24,7 +24,13 @@ func (h *Handler) Static() http.Handler {
 			return
 		}
 
-		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/assets/") {
+		if r.URL.Path == "/" {
+			w.Header().Set("Cache-Control", "no-store")
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			w.Header().Set("Cache-Control", "no-cache")
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -39,6 +45,7 @@ func serveIndex(sub fs.FS, w http.ResponseWriter) {
 		writeError(w, http.StatusInternalServerError, "页面加载失败")
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(content)
 }

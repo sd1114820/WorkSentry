@@ -12,30 +12,53 @@ import (
 	"worksentry/internal/config"
 )
 
-func TestReportQueryContextLeavesTimeToReturnError(t *testing.T) {
+func TestReportQueryContextIsIndependentFromHTTPWriteTimeout(t *testing.T) {
 	h := &Handler{Config: &config.Config{Server: config.ServerConfig{
 		WriteTimeoutSeconds:       9,
 		ReportQueryTimeoutSeconds: 20,
 	}}}
 	ctx, cancel, timeout := h.reportQueryContext(context.Background())
 	defer cancel()
-	if timeout != 7*time.Second {
-		t.Fatalf("查询超时 = %s，期望 7s", timeout)
+	if timeout != 2*time.Minute {
+		t.Fatalf("查询超时 = %s，期望 2m", timeout)
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		t.Fatal("报表查询上下文应包含截止时间")
 	}
 }
 
-func TestDefaultReportQueryTimeoutReturnsBeforeGateway(t *testing.T) {
+func TestDefaultReportQueryTimeoutSupportsBackgroundGeneration(t *testing.T) {
 	h := &Handler{}
 	ctx, cancel, timeout := h.reportQueryContext(context.Background())
 	defer cancel()
-	if timeout != 5*time.Second {
-		t.Fatalf("默认报表查询超时 = %s，期望 5s", timeout)
+	if timeout != 2*time.Minute {
+		t.Fatalf("默认报表查询超时 = %s，期望 2m", timeout)
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		t.Fatal("默认报表查询上下文应包含截止时间")
+	}
+}
+
+func TestOldFiveSecondReportTimeoutIsRaised(t *testing.T) {
+	h := &Handler{Config: &config.Config{Server: config.ServerConfig{
+		WriteTimeoutSeconds:       15,
+		ReportQueryTimeoutSeconds: 5,
+	}}}
+	_, cancel, timeout := h.reportQueryContext(context.Background())
+	defer cancel()
+	if timeout != 2*time.Minute {
+		t.Fatalf("旧配置的报表查询超时 = %s，期望提高到 2m", timeout)
+	}
+}
+
+func TestLongerConfiguredReportTimeoutIsKept(t *testing.T) {
+	h := &Handler{Config: &config.Config{Server: config.ServerConfig{
+		ReportQueryTimeoutSeconds: 300,
+	}}}
+	_, cancel, timeout := h.reportQueryContext(context.Background())
+	defer cancel()
+	if timeout != 5*time.Minute {
+		t.Fatalf("报表查询超时 = %s，期望 5m", timeout)
 	}
 }
 

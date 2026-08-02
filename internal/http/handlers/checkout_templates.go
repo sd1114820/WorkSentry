@@ -94,6 +94,10 @@ func (h *Handler) listCheckoutTemplates(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) createCheckoutTemplate(w http.ResponseWriter, r *http.Request) {
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "数据库未初始化")
+		return
+	}
 	var payload CheckoutTemplatePayload
 	if err := decodeJSON(r, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "参数格式错误")
@@ -109,7 +113,15 @@ func (h *Handler) createCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	id, err := h.Queries.CreateCheckoutTemplate(r.Context(), sqlc.CreateCheckoutTemplateParams{
+	tx, err := h.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "保存模板失败")
+		return
+	}
+	defer tx.Rollback()
+	queries := sqlc.New(tx)
+
+	id, err := queries.CreateCheckoutTemplate(r.Context(), sqlc.CreateCheckoutTemplateParams{
 		DepartmentID: payload.DepartmentID,
 		NameZh:       payload.Name,
 		Enabled:      payload.Enabled,
@@ -120,7 +132,14 @@ func (h *Handler) createCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	if payload.Enabled {
-		_ = h.Queries.DisableOtherCheckoutTemplates(r.Context(), payload.DepartmentID, id)
+		if err := queries.DisableOtherCheckoutTemplates(r.Context(), payload.DepartmentID, id); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存模板失败")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存模板失败")
+		return
 	}
 
 	h.logAudit(r, "create_checkout_template", "checkout_template", sql.NullInt64{Int64: id, Valid: true}, payload)
@@ -128,6 +147,10 @@ func (h *Handler) createCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) updateCheckoutTemplate(w http.ResponseWriter, r *http.Request) {
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "数据库未初始化")
+		return
+	}
 	var payload CheckoutTemplatePayload
 	if err := decodeJSON(r, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "参数格式错误")
@@ -143,7 +166,15 @@ func (h *Handler) updateCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	template, err := h.Queries.GetCheckoutTemplateByID(r.Context(), payload.ID)
+	tx, err := h.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "更新模板失败")
+		return
+	}
+	defer tx.Rollback()
+	queries := sqlc.New(tx)
+
+	template, err := queries.GetCheckoutTemplateByID(r.Context(), payload.ID)
 	if err == sql.ErrNoRows {
 		writeError(w, http.StatusNotFound, "模板不存在")
 		return
@@ -153,7 +184,7 @@ func (h *Handler) updateCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.Queries.UpdateCheckoutTemplate(r.Context(), sqlc.UpdateCheckoutTemplateParams{
+	if err := queries.UpdateCheckoutTemplate(r.Context(), sqlc.UpdateCheckoutTemplateParams{
 		ID:      payload.ID,
 		NameZh:  payload.Name,
 		Enabled: payload.Enabled,
@@ -163,7 +194,14 @@ func (h *Handler) updateCheckoutTemplate(w http.ResponseWriter, r *http.Request)
 	}
 
 	if payload.Enabled {
-		_ = h.Queries.DisableOtherCheckoutTemplates(r.Context(), template.DepartmentID, payload.ID)
+		if err := queries.DisableOtherCheckoutTemplates(r.Context(), template.DepartmentID, payload.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "更新模板失败")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "更新模板失败")
+		return
 	}
 
 	h.logAudit(r, "update_checkout_template", "checkout_template", sql.NullInt64{Int64: payload.ID, Valid: true}, payload)
